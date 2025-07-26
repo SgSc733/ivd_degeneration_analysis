@@ -1,0 +1,2 @@
+# ivd_degeneration_analysis
+基于Python的MRI-T2椎间盘影像特征提取系统
