@@ -278,12 +278,21 @@ ivd-feature-extraction/
 
 ### 参考文献
 [1]McSweeney T, Tiulpin A, Kowlagi N, Määttä J, Karppinen J, Saarakkala S. Robust Radiomic Signatures of Intervertebral Disc Degeneration from MRI. Spine (Phila Pa 1976). 2025 Jun 20.
+
 [2]Ma J, Wang R, Yu Y, Xu X, Duan H, Yu N. Is fractal dimension a reliable imaging biomarker for the quantitative classification of an intervertebral disk? Eur Spine J. 2020 May;29(5):1175-1180. 
+
 [3]Murto N, Luoma K, Lund T, Kerttula L. Reliability of T2-weighted signal intensity-based quantitative measurements and visual grading of lumbar disc degeneration on MRI. Acta Radiol. 2023 Jun;64(6):2145-2151.
+
 [4]Ruiz-España S, Arana E, Moratal D. Semiautomatic computer-aided classification of degenerative lumbar spine disease in magnetic resonance imaging. Comput Biol Med. 2015 Jul;62:196-205. 
+
 [5]Beulah, A., Sharmila, T.S. & Pramod, V.K. Degenerative disc disease diagnosis from lumbar MR images using hybrid features. Vis Comput 38, 2771–2783 (2022).
+
 [6]Michopoulou S, Costaridou L, Vlychou M, Speller R, Todd-Pokropek A. Texture-based quantification of lumbar intervertebral disc degeneration from conventional T2-weighted MRI. Acta Radiol. 2011 Feb 1;52(1):91-8. 
+
 [7]Zheng, HD., Sun, YL., Kong, DW. et al. Deep learning-based high-accuracy quantitation for lumbar intervertebral disc degeneration from MRI. Nat Commun 13, 841 (2022).
+
 [8]Waldenberg C, Hebelka H, Brisby H, Lagerstrand KM. MRI histogram analysis enables objective and continuous classification of intervertebral disc degeneration. Eur Spine J. 2018 May;27(5):1042-1048.
+
 [9]van Griethuysen, J. J. M., Fedorov, A., Parmar, C., Hosny, A., Aucoin, N., Narayan, V., Beets-Tan, R. G. H., Fillon-Robin, J. C., Pieper, S., Aerts, H. J. W. L. (2017). Computational Radiomics System to Decode the Radiographic Phenotype. Cancer Research, 77(21), e104–e107. 
+
 [10]Lin A, Zhang H, Wang Y, Cui Q, Zhu K, Zhou D, Han S, Meng S, Han J, Li L, Zhou C, Ma X. Radiomics based on MRI to predict recurrent L4-5 disc herniation after percutaneous endoscopic lumbar discectomy. BMC Med Imaging. 2024 Oct 10;24(1):273.
