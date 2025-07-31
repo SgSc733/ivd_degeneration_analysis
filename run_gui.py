@@ -2,9 +2,16 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from main import main
-import sys
+import tkinter as tk
+from gui import IntegratedFeatureExtractorGUI
+
+def main():
+    root = tk.Tk()
+    root.title("椎间盘退变分析系统")
+    root.geometry("950x1000")
+    
+    app = IntegratedFeatureExtractorGUI(root)
+    root.mainloop()
 
 if __name__ == "__main__":
-    sys.argv.append('--gui')
     main()
