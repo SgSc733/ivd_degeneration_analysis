@@ -266,6 +266,7 @@ $$
   - **PyRadiomics导入失败**: 确认 `numpy` 版本低于2.0，运行 `pip install "numpy<2.0" pyradiomics`。
   - **DICOM文件读取错误**: 确保安装了 `pydicom`，运行 `pip install pydicom`。
 
+-----
 
 ## 模块二：图像扰动
 
