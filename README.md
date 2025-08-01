@@ -370,7 +370,7 @@ glcm_Contrast_geom      # 几何扰动
 
 | 参数 | 推荐设置 | 原理与依据 |
 | :--- | :--- | :--- |
-| **ICC类型** | `ICC(3,k)` | **双向混合模型 (Two-Way Mixed-Effects)**。研究目标（椎间盘）是随机样本，而测量条件（`gold`, `noise`等）是我们设定的**固定效应**。 |
+| **ICC类型** | `ICC(3,k)` | **双向混合模型 (Two-Way Mixed-Effects)**。研究目标（椎间盘）是随机样本，而测量条件（`gold`, `noise`等）是我们设定的固定效应。 |
 | **ICC置信水平** | `0.95` | **95%置信区间**是医学统计研究的黄金标准。 |
 
 #### II. 聚类分析设置
@@ -379,7 +379,7 @@ glcm_Contrast_geom      # 几何扰动
 | :--- | :--- | :--- |
 | **链接方法** | `ward` | 旨在最小化簇内方差之和，倾向于产生大小均等、结构紧凑的球状簇。 |
 | **距离度量** | `euclidean` | 欧几里得距离是与`ward`链接方法配套使用的标准度量，因为它基于方差计算，两者在数学上是兼容的。 |
-| **簇选择方式** | `min_icc` | 确保了最终入选的特征集中，**每一个成员**在**最差情况**下的表现都有保障（即“木桶的短板最长”）。 |
+| **簇选择方式** | `min_icc` | 确保了最终入选的特征集中，每一个成员在最差情况下的表现都有保障（即“木桶的短板最长”）。 |
 | **聚类数量** | `manual` | 建议首先使用\*\*“显示聚类树状图”\*\*功能，通过观察树状图的结构来做出专业的、有依据的判断，然后手动输入簇数量。程序提供的“自动建议k值”可作为参考。 |
 
 #### III. 相关性分析设置
@@ -399,12 +399,21 @@ glcm_Contrast_geom      # 几何扰动
 ## 7\. 参考文献
 
 [1] McSweeney T, Tiulpin A, Kowlagi N, Määttä J, Karppinen J, Saarakkala S. Robust Radiomic Signatures of Intervertebral Disc Degeneration from MRI. Spine (Phila Pa 1976). 2025 Jun 20.
+
 [2] Ma J, Wang R, Yu Y, Xu X, Duan H, Yu N. Is fractal dimension a reliable imaging biomarker for the quantitative classification of an intervertebral disk? Eur Spine J. 2020 May;29(5):1175-1180.
+
 [3] Murto N, Luoma K, Lund T, Kerttula L. Reliability of T2-weighted signal intensity-based quantitative measurements and visual grading of lumbar disc degeneration on MRI. Acta Radiol. 2023 Jun;64(6):2145-2151.
+
 [4] Ruiz-España S, Arana E, Moratal D. Semiautomatic computer-aided classification of degenerative lumbar spine disease in magnetic resonance imaging. Comput Biol Med. 2015 Jul;62:196-205.
+
 [5] Beulah, A., Sharmila, T.S. & Pramod, V.K. Degenerative disc disease diagnosis from lumbar MR images using hybrid features. Vis Comput 38, 2771–2783 (2022).
+
 [6] Michopoulou S, Costaridou L, Vlychou M, Speller R, Todd-Pokropek A. Texture-based quantification of lumbar intervertebral disc degeneration from conventional T2-weighted MRI. Acta Radiol. 2011 Feb 1;52(1):91-8.
+
 [7] Zheng, HD., Sun, YL., Kong, DW. et al. Deep learning-based high-accuracy quantitation for lumbar intervertebral disc degeneration from MRI. Nat Commun 13, 841 (2022).
+
 [8] Waldenberg C, Hebelka H, Brisby H, Lagerstrand KM. MRI histogram analysis enables objective and continuous classification of intervertebral disc degeneration. Eur Spine J. 2018 May;27(5):1042-1048.
+
 [9] van Griethuysen, J. J. M., et al. (2017). Computational Radiomics System to Decode the Radiographic Phenotype. Cancer Research, 77(21), e104–e107.
+
 [10] Lin A, et al. Radiomics based on MRI to predict recurrent L4-5 disc herniation after percutaneous endoscopic lumbar discectomy. BMC Med Imaging. 2024 Oct 10;24(1):273.
