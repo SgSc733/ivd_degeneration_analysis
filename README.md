@@ -64,7 +64,7 @@
 1.  **克隆项目**
 
     ```bash
-    git clone https://github.com/your-username/your-repo-name.git
+    git clone https://github.com/SgSc733/ivd_degeneration_analysis.git
     cd your-repo-name
     ```
 
