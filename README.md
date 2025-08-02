@@ -100,7 +100,7 @@ python run_gui.py
 
 #### 预处理验证工具
 ```bash
-python preprocessing_validator.py
+python run_preprocessing_validator.py
 ```
 -----
 
