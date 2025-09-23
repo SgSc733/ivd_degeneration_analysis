@@ -78,6 +78,41 @@ class DHICalculator(BaseCalculator):
             
         except Exception as e:
             raise RuntimeError(f"DHI计算失败: {str(e)}")
+        
+    def _extract_central_region(self, disc_mask: np.ndarray,
+                                anterior_mid: np.ndarray,
+                                posterior_mid: np.ndarray,
+                                percentage: float) -> np.ndarray:
+
+        h, w = disc_mask.shape
+        center_line_vector = posterior_mid - anterior_mid
+        line_length = np.linalg.norm(center_line_vector)
+        
+        if line_length < 1e-6:
+            return np.zeros_like(disc_mask, dtype=np.uint8)
+            
+        direction_vector = center_line_vector / line_length
+
+        center_point = (anterior_mid + posterior_mid) / 2
+        half_width = line_length * percentage / 2
+        
+        ys, _ = np.where(disc_mask > 0)
+        disc_approx_height = (np.max(ys) - np.min(ys)) if len(ys) > 0 else 20
+        half_height = disc_approx_height * 0.75 / 2
+
+        perp_vector = np.array([-direction_vector[1], direction_vector[0]])
+
+        p1 = center_point - half_width * direction_vector + half_height * perp_vector
+        p2 = center_point + half_width * direction_vector + half_height * perp_vector
+        p3 = center_point + half_width * direction_vector - half_height * perp_vector
+        p4 = center_point - half_width * direction_vector - half_height * perp_vector
+        
+        contour = np.array([p1, p2, p3, p4], dtype=np.int32)
+        
+        central_mask = np.zeros_like(disc_mask, dtype=np.uint8)
+        cv2.fillPoly(central_mask, [contour], 255)
+        
+        return cv2.bitwise_and(central_mask, disc_mask.astype(np.uint8))
     
     def _calculate_vertebral_corners(self, vertebra_mask: np.ndarray) -> np.ndarray:
 
@@ -130,6 +165,22 @@ class DHICalculator(BaseCalculator):
             
         corners = np.squeeze(corners).astype(int)
         return self._sort_corners_robust(corners)
+    
+    def _fallback_corner_detection(self, mask: np.ndarray) -> np.ndarray:
+        """备用角点检测方法"""
+        rows = np.any(mask, axis=1)
+        cols = np.any(mask, axis=0)
+        rmin, rmax = np.where(rows)[0][[0, -1]]
+        cmin, cmax = np.where(cols)[0][[0, -1]]
+        
+        corners = np.array([
+            [cmin, rmin],
+            [cmax, rmin],
+            [cmin, rmax],
+            [cmax, rmax]
+        ])
+        
+        return corners
     
     def _sort_corners_robust(self, corners: np.ndarray) -> np.ndarray:
         corners_copy = corners.copy()
@@ -267,12 +318,48 @@ class DHICalculator(BaseCalculator):
         
         return points.astype(int)
     
+    def _calculate_vertebral_diameter(self, corners: np.ndarray) -> float:
+
+        corners_sorted_by_x = corners[np.argsort(corners[:, 0])]
+        anterior_points = corners_sorted_by_x[:2]
+        posterior_points = corners_sorted_by_x[2:]
+        
+        anterior_midpoint = np.mean(anterior_points, axis=0)
+        posterior_midpoint = np.mean(posterior_points, axis=0)
+        
+        return np.linalg.norm(anterior_midpoint - posterior_midpoint)
+
+    def _calculate_vertebral_height(self, vertebra_mask: np.ndarray, diameter: float) -> float:
+
+        area = np.sum(vertebra_mask > 0)
+        if diameter < 1e-6:
+            return 0
+        return area / diameter
+
+    def _calculate_vertebral_diameter(self, corners: np.ndarray) -> float:
+
+        corners_sorted_by_x = corners[np.argsort(corners[:, 0])]
+        anterior_points = corners_sorted_by_x[:2]
+        posterior_points = corners_sorted_by_x[2:]
+        
+        anterior_midpoint = np.mean(anterior_points, axis=0)
+        posterior_midpoint = np.mean(posterior_points, axis=0)
+        
+        return np.linalg.norm(anterior_midpoint - posterior_midpoint)
+
+    def _calculate_vertebral_height(self, vertebra_mask: np.ndarray, diameter: float) -> float:
+
+        area = np.sum(vertebra_mask > 0)
+        if diameter < 1e-6:
+            return 0
+        return area / diameter
+
     def _calculate_dhi(self, disc_height: float, 
-                      upper_vertebra_height: float,
-                      lower_vertebra_height: float) -> float:
+                    upper_vertebra_height: float,
+                    lower_vertebra_height: float) -> float:
 
         denominator = upper_vertebra_height + lower_vertebra_height
-        if denominator == 0:
+        if denominator < 1e-6:
             return 0
             
         dhi = 2 * disc_height / denominator
@@ -345,9 +432,7 @@ class DHICalculator(BaseCalculator):
         valid_slices = 0
         
         for i, result, error in sorted(results, key=lambda x: x[0]):
-            if error:
-                self.logger.warning(f"切片{i}处理失败: {error}")
-            elif result:
+            if result:
                 dhi_results.append(result)
                 valid_slices += 1
         
