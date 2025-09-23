@@ -28,7 +28,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from calculator import (
     DHICalculator, ASICalculator, FractalDimensionCalculator,
     T2SignalIntensityCalculator, GaborCalculator, HuMomentsCalculator,
-    TextureFeaturesCalculator
+    TextureFeaturesCalculator, DSCRCalculator
 )
 from utils import ImageIO, Preprocessor
 from config import Config
@@ -65,6 +65,8 @@ LANG_DICT = {
         'enable_gabor': 'Gabor纹理特征',
         'enable_hu': 'Hu不变矩',
         'enable_texture': '扩展纹理特征',
+        'enable_dscr': '椎管狭窄率 (DSCR)',
+        'dural_sac_label': '硬脊膜囊标签值:',
         'other_feature_settings': '其他特征设置',
         'csf_label': 'CSF标签值:',
         'processing_other': '🔄 处理其他特征...',
@@ -183,151 +185,11 @@ LANG_DICT = {
         'cpu_cores': 'CPU核心数:',
         'welcome_msg': """
 🎯 椎间盘退变特征提取系统已就绪！
-
-📋 支持PyRadiomics和其他特征提取
-💡 提示：参数已设置为常用默认值！
         """,
         'example_range': '(例: -50,100)',
         'axial_coronal_sagittal': '(0=轴向, 1=冠状, 2=矢状)',
         'negative_nan_note': '(负值返回原图, nan透明)',
         'negative_all_note': '(负值处理所有体素)'
-    },
-    'en': {
-        'title': 'IVD Degeneration Analysis System',
-        'other_features': 'Other Features',
-        'enable_dhi': 'Disc Height Index (DHI)',
-        'enable_asi': 'Peak Signal Intensity Difference (ASI)',
-        'enable_fd': 'Fractal Dimension (FD)',
-        'enable_t2si': 'T2 Signal Intensity',
-        'enable_gabor': 'Gabor Texture Features',
-        'enable_hu': 'Hu Moments',
-        'enable_texture': 'Extended Texture Features',
-        'other_feature_settings': 'Other Feature Settings',
-        'csf_label': 'CSF Label Value:',
-        'processing_other': '🔄 Processing other features...',
-        'other_complete': '✅ Other feature extraction complete',
-        'feature_type': 'Feature Type:',
-        'pyradiomics_features': 'PyRadiomics Features',
-        'other_features_option': 'Other Features',
-        'both_features': 'Extract Both',
-        'file_selection': '📁 File Selection',
-        'process_mode': 'Process Mode:',
-        'batch_mode': '📊 Batch Process',
-        'single_mode': '🔍 Single Case',
-        'input_path': 'Input Path:',
-        'mask_path': 'Mask Path:',
-        'output_path': 'Output Path:',
-        'select': 'Select',
-        'basic_settings': '🔧 Basic Settings',
-        'parameter_settings': 'Parameter Settings',
-        'bin_width': 'Bin Width:',
-        'bin_count': 'Bin Count:',
-        'resample_spacing': 'Resample Spacing:',
-        'interpolator': 'Interpolator:',
-        'normalize': 'Normalize Intensity',
-        'scale': 'Scale:',
-        'remove_outliers': 'Remove Outliers(nσ):',
-        'correct_mask': 'Auto Correct Mask',
-        'label': 'Label Value:',
-        'feature_classes': 'Feature Classes',
-        'shape_3d': 'Shape Features (3D)',
-        'shape_2d': 'Shape Features (2D)',
-        'firstorder': 'First Order Features',
-        'glcm': 'Gray Level Co-occurrence Matrix (GLCM)',
-        'glrlm': 'Gray Level Run Length Matrix (GLRLM)',
-        'glszm': 'Gray Level Size Zone Matrix (GLSZM)',
-        'gldm': 'Gray Level Dependence Matrix (GLDM)',
-        'ngtdm': 'Neighboring Gray Tone Difference Matrix (NGTDM)',
-        'advanced_params': 'Advanced Parameters',
-        'pad_distance': 'Pad Distance:',
-        'geometry_tolerance': 'Geometry Tolerance:',
-        'min_roi_dimensions': 'Min ROI Dimensions:',
-        'min_roi_size': 'Min ROI Size:',
-        'additional_info': 'Include Diagnostics',
-        'enable_c_extensions': 'Enable C Extensions',
-        'filter_settings': '🔧 Filter Settings',
-        'log_filter': 'LoG Filter',
-        'enable_log': 'Enable LoG Filter',
-        'sigma_values': 'Sigma Values:',
-        'wavelet_filter': 'Wavelet Filter',
-        'enable_wavelet': 'Enable Wavelet Filter',
-        'wavelet_type': 'Wavelet Type:',
-        'decomposition_level': 'Decomposition Level:',
-        'start_level': 'Start Level:',
-        'simple_filters': 'Simple Filters',
-        'square': 'Square',
-        'square_root': 'Square Root',
-        'logarithm': 'Logarithm',
-        'exponential': 'Exponential',
-        'gradient_filter': 'Gradient Filter',
-        'enable_gradient': 'Enable Gradient Filter',
-        'use_spacing': 'Use Spacing',
-        'lbp_filter': 'LBP Filter',
-        'enable_lbp2d': 'Enable LBP 2D',
-        'radius': 'Radius:',
-        'samples': 'Samples:',
-        'enable_lbp3d': 'Enable LBP 3D',
-        'levels': 'Levels:',
-        'advanced_settings': '🔧 Advanced Settings',
-        'resegmentation_settings': 'Resegmentation Settings',
-        'resegment_range': 'Resegment Range:',
-        'resegment_mode': 'Resegment Mode:',
-        'resegment_shape': 'Resegment Shape',
-        '2d_settings': '2D Settings',
-        'force_2d': 'Force 2D Extraction',
-        '2d_dimension': '2D Dimension:',
-        'force2d_aggregator': '2D Aggregator:',
-        'aggregator_mean': 'Mean',
-        'aggregator_max': 'Maximum',
-        'aggregator_min': 'Minimum', 
-        'aggregator_std': 'Standard Deviation',
-        'aggregator_sum': 'Sum',
-        'texture_matrix_settings': 'Texture Matrix Settings',
-        'weighting_norm': 'Weighting Norm:',
-        'distances': 'Distances:',
-        'symmetrical_glcm': 'Symmetrical GLCM',
-        'gldm_alpha': 'GLDM α:',
-        'other_settings': 'Other Settings',
-        'voxel_array_shift': 'Voxel Array Shift:',
-        'pre_crop': 'Pre-Crop',
-        'voxel_settings': '🔧 Voxel-based Settings',
-        'voxel_based_settings': 'Voxel-based Specific Settings',
-        'kernel_radius': 'Kernel Radius:',
-        'masked_kernel': 'Masked Kernel',
-        'init_value': 'Init Value:',
-        'voxel_batch': 'Voxel Batch:',
-        'parameter_management': 'Parameter Management',
-        'save_params': '💾 Save Parameters',
-        'load_params': '📂 Load Parameters',
-        'reset_defaults': '🔄 Reset to Defaults',
-        'execution_control': 'Execution Control',
-        'start_extraction': '🚀 Start Extraction',
-        'stop': '⏹ Stop',
-        'run_log': '📝 Run Log',
-        'language': 'Language',
-        'chinese': '中文',
-        'english': 'English',
-        'select_input_file': 'Select Image File',
-        'select_batch_csv': 'Select Batch CSV File',
-        'select_mask_file': 'Select Mask File', 
-        'save_results': 'Save Results',
-        'error': 'Error',
-        'warning': 'Warning',
-        'info': 'Info',
-        'parallel_settings': 'Parallel Processing Settings',
-        'enable_parallel': 'Enable Parallel Processing',
-        'worker_processes': 'Worker Processes:',
-        'cpu_cores': 'CPU Cores:',
-        'welcome_msg': """
-🎯 IVD Degeneration Feature Extraction System is ready!
-
-📋 Supports PyRadiomics and other feature extraction
-💡 Tip: Parameters are set to common defaults!
-        """,
-        'example_range': '(e.g. -50,100)',
-        'axial_coronal_sagittal': '(0=axial, 1=coronal, 2=sagittal)',
-        'negative_nan_note': '(negative returns original, nan transparent)',
-        'negative_all_note': '(negative processes all voxels)'
     }
 }
 
@@ -349,6 +211,12 @@ class IntegratedFeatureExtractorGUI:
         self.gabor_calculator = GaborCalculator(**self.config.GABOR_PARAMS)
         self.hu_calculator = HuMomentsCalculator(**self.config.HU_MOMENTS_PARAMS)
         self.texture_calculator = TextureFeaturesCalculator(**self.config.TEXTURE_PARAMS)
+        self.dscr_calculator = DSCRCalculator(**self.config.DSCR_PARAMS)
+
+        import queue
+        import threading
+        self.log_queue = queue.Queue()
+        self._stop_log_processing = False
 
         style = ttk.Style()
         try:
@@ -429,6 +297,8 @@ class IntegratedFeatureExtractorGUI:
         self.enable_other_gabor = tk.BooleanVar(value=True)  
         self.enable_other_hu = tk.BooleanVar(value=True)     
         self.enable_other_texture = tk.BooleanVar(value=True)
+        self.enable_other_dscr = tk.BooleanVar(value=True) 
+        self.dural_sac_label = tk.IntVar(value=20)
 
         self.csf_label = tk.IntVar(value=1)
 
@@ -438,9 +308,33 @@ class IntegratedFeatureExtractorGUI:
 
         self.setup_gui()
 
+        self._start_log_processor()
+
         if not PYRADIOMICS_AVAILABLE and PYRADIOMICS_ERROR:
             messagebox.showwarning("PyRadiomics不可用", 
-                                 f"PyRadiomics功能将被禁用:\n\n{PYRADIOMICS_ERROR}\n\n您仍可以使用自定义特征提取功能。")
+                                 f"PyRadiomics功能将被禁用:\n\n{PYRADIOMICS_ERROR}\n\n仍可以使用自定义特征提取功能。")
+            
+    def _start_log_processor(self):
+
+        self._process_log_queue()
+        
+    def _process_log_queue(self):
+
+        if self._stop_log_processing:
+            return
+        
+        try:
+            while not self.log_queue.empty():
+                message = self.log_queue.get_nowait()
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
+                self.log_text.see(tk.END)
+        except queue.Empty:
+            pass
+        except Exception as e:
+            print(f"Log processing error: {e}")
+        
+        self.root.after(100, self._process_log_queue)
     
     def _init_pyradiomics_variables(self):
         self.bin_width = tk.DoubleVar(value=16)
@@ -451,7 +345,7 @@ class IntegratedFeatureExtractorGUI:
         self.normalize_scale = tk.DoubleVar(value=1.0)
         self.remove_outliers = tk.DoubleVar(value=0.0)
         self.correct_mask = tk.BooleanVar(value=False)
-        self.label = tk.IntVar(value=1)
+        self.label = tk.IntVar(value=3)
         self.pad_distance = tk.IntVar(value=5)
         self.geometry_tolerance = tk.StringVar(value="1e-16")
         self.additional_info = tk.BooleanVar(value=True)
@@ -460,7 +354,7 @@ class IntegratedFeatureExtractorGUI:
         self.minimum_roi_size = tk.IntVar(value=50)
         self.preCrop = tk.BooleanVar(value=False)
         self.voxel_array_shift = tk.IntVar(value=0)
-        self.force2D = tk.BooleanVar(value=True)
+        self.force2D = tk.BooleanVar(value=False)
         self.force2D_dimension = tk.IntVar(value=0)
         self.force2D_aggregator = tk.StringVar(value="mean")
         self.distances = tk.StringVar(value="1")
@@ -710,7 +604,8 @@ class IntegratedFeatureExtractorGUI:
                 self.get_text('enable_t2si'),
                 self.get_text('enable_gabor'),
                 self.get_text('enable_hu'),
-                self.get_text('enable_texture')
+                self.get_text('enable_texture'),
+                self.get_text('enable_dscr')  
             ]
             for i, cb in enumerate(self.other_feature_checkboxes):
                 if i < len(texts):
@@ -803,8 +698,8 @@ class IntegratedFeatureExtractorGUI:
         
         self.main_notebook.bind("<<NotebookTabChanged>>", self._on_main_tab_changed)
 
-    def _setup_main_header(self, parent):
 
+    def _setup_main_header(self, parent):
         header_frame = ttk.Frame(parent)
         header_frame.pack(fill="x", pady=(10, 10))
         
@@ -819,57 +714,25 @@ class IntegratedFeatureExtractorGUI:
         title_label.pack(side="left")
         self.widgets['main_title_label'] = title_label
         
-        lang_frame = ttk.Frame(header_frame)
-        lang_frame.pack(side="right", padx=(20, 20))
-        
-        lang_label = ttk.Label(lang_frame, text="语言/Language:")
-        lang_label.pack(side="left", padx=(0, 5))
-        
-        lang_combo = ttk.Combobox(lang_frame, 
-                                values=["中文", "English"], 
-                                width=10, 
-                                state="readonly")
-        lang_combo.pack(side="left")
-        lang_combo.set("中文" if self.current_lang.get() == "cn" else "English")
-        
-        def on_lang_change(event):
-            if lang_combo.get() == "中文":
-                self.current_lang.set("cn")
-            else:
-                self.current_lang.set("en")
-            self.update_language()
-            
-            if hasattr(self, 'perturbation_gui'):
-                self.perturbation_gui.current_lang.set(self.current_lang.get())
-                self.perturbation_gui.update_language()
-            if hasattr(self, 'robustness_gui'):
-                self.robustness_gui.current_lang.set(self.current_lang.get())
-                self.robustness_gui.update_language()
-        
-        lang_combo.bind("<<ComboboxSelected>>", on_lang_change)
-        self.widgets['main_lang_combo'] = lang_combo
 
     def _setup_extraction_tab(self, parent):
-
         canvas = tk.Canvas(parent, bg='#f0f0f0', highlightthickness=0)
         scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
-        
+
         canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        
+
         def configure_scroll_region(event=None):
             canvas.configure(scrollregion=canvas.bbox("all"))
-            canvas_width = canvas.winfo_width()
-            if canvas_width > 0:
-                canvas.itemconfig(canvas_window, width=canvas_width)
-        
-        scrollable_frame.bind("<Configure>", configure_scroll_region)
-        canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_window, width=e.width))
-        canvas.configure(yscrollcommand=scrollbar.set)
         
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        scrollable_frame.bind("<Configure>", configure_scroll_region)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_window, width=e.width))
+        parent.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        canvas.configure(yscrollcommand=scrollbar.set)
         
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
@@ -877,6 +740,8 @@ class IntegratedFeatureExtractorGUI:
         main_frame = ttk.Frame(scrollable_frame, padding="15")
         main_frame.pack(fill="both", expand=True)
         
+        self.extraction_canvas = canvas
+
         self._setup_file_selection(main_frame)
         self._setup_feature_type(main_frame)
         self._setup_parameters_notebook(main_frame)
@@ -884,17 +749,27 @@ class IntegratedFeatureExtractorGUI:
         self._setup_log_display(main_frame)
 
     def _on_main_tab_changed(self, event):
+        def _on_mousewheel(event, canvas):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-        selected_tab = self.main_notebook.select()
-        tab_text = self.main_notebook.tab(selected_tab, "text")
-        self.log_message(f"切换到: {tab_text}")
+        selected_tab_index = self.main_notebook.index(self.main_notebook.select())
         
-        if hasattr(self, 'perturbation_gui'):
-            self.perturbation_gui.current_lang.set(self.current_lang.get())
-            self.perturbation_gui.update_language()
-        if hasattr(self, 'robustness_gui'):
-            self.robustness_gui.current_lang.set(self.current_lang.get())
-            self.robustness_gui.update_language()
+        self.root.unbind_all("<MouseWheel>")
+
+        if selected_tab_index == 0:
+            if hasattr(self, 'extraction_canvas'):
+                self.root.bind_all("<MouseWheel>", 
+                                   lambda e, canvas=self.extraction_canvas: _on_mousewheel(e, canvas))
+        elif selected_tab_index == 1:
+            if hasattr(self.perturbation_gui, 'canvas'):
+                self.root.bind_all("<MouseWheel>", 
+                                   lambda e, canvas=self.perturbation_gui.canvas: _on_mousewheel(e, canvas))
+        elif selected_tab_index == 2:
+            if hasattr(self.robustness_gui, 'canvas'):
+                self.root.bind_all("<MouseWheel>", 
+                                   lambda e, canvas=self.robustness_gui.canvas: _on_mousewheel(e, canvas))
+
+        tab_text = self.main_notebook.tab(self.main_notebook.select(), "text")
     
     def _setup_header(self, parent):
         header_frame = ttk.Frame(parent)
@@ -1002,7 +877,7 @@ class IntegratedFeatureExtractorGUI:
                             command=self.select_output)
         output_btn.pack(side="left")
         self.widgets['output_btn'] = output_btn
-    
+
     def _setup_feature_type(self, parent):
         type_frame = ttk.LabelFrame(parent, text=self.get_text('feature_type'), padding="10")
         type_frame.pack(fill="x", pady=5)
@@ -1026,54 +901,52 @@ class IntegratedFeatureExtractorGUI:
                                     command=self._on_feature_type_change)
         both_radio.pack(side="left", padx=10)
         self.widgets['both_radio'] = both_radio
-        
+
     def _on_feature_type_change(self):
         feature_type = self.feature_type.get()
 
-        tabs = self.notebook.tabs()
-
-        for tab in tabs:
-            self.notebook.hide(tab)
-
-        first_visible_tab = None
+        if hasattr(self, 'other_features_tab'):
+            try:
+                self.notebook.forget(self.other_features_tab)
+            except tk.TclError:
+                pass
         
-        if feature_type == "pyradiomics":
-            if PYRADIOMICS_AVAILABLE and len(tabs) >= 4:
-                self.notebook.add(tabs[1]) 
-                self.notebook.add(tabs[2]) 
-                self.notebook.add(tabs[3])  
-                first_visible_tab = tabs[1]
-        elif feature_type == "other":
-            self.notebook.add(tabs[0]) 
-            first_visible_tab = tabs[0]
-        else:  
-            for tab in tabs:
-                self.notebook.add(tab)
-            first_visible_tab = tabs[0]
-        
-        if first_visible_tab:
-            self.notebook.select(first_visible_tab)
+        if hasattr(self, 'pyrad_tab') and PYRADIOMICS_AVAILABLE:
+            try:
+                self.notebook.forget(self.pyrad_tab)
+            except tk.TclError:
+                pass
+
+        if feature_type == "other":
+            self.notebook.add(self.other_features_tab, text="其他特征")
+            self.notebook.select(self.other_features_tab)
+        elif feature_type == "pyradiomics":
+            if PYRADIOMICS_AVAILABLE:
+                self.notebook.add(self.pyrad_tab, text="PyRadiomic特征")
+                self.notebook.select(self.pyrad_tab)
+        elif feature_type == "both":
+            self.notebook.add(self.other_features_tab, text="其他特征")
+            if PYRADIOMICS_AVAILABLE:
+                self.notebook.add(self.pyrad_tab, text="PyRadiomic特征")
+            self.notebook.select(self.other_features_tab)
     
     def _setup_parameters_notebook(self, parent):
-        self.notebook = ttk.Notebook(parent)
-        self.notebook.pack(fill="x", pady=5)
+        param_container = ttk.LabelFrame(parent, text="参数设置", padding="10")
+        param_container.pack(fill="x", pady=5)
 
-        other_frame = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(other_frame, text=self.get_text('other_features'))
-        self._setup_other_features(other_frame)
+        self.notebook = ttk.Notebook(param_container)
+        self.notebook.pack(fill="x", expand=True, pady=5)
+
+        self.other_features_tab = ttk.Frame(self.notebook, padding="10")
+        self._setup_other_features(self.other_features_tab)
 
         if PYRADIOMICS_AVAILABLE:
-            basic_frame = ttk.Frame(self.notebook, padding="10")
-            self.notebook.add(basic_frame, text=self.get_text('basic_settings'))
-            self._setup_basic_settings(basic_frame)
-
-            filter_frame = ttk.Frame(self.notebook, padding="10")
-            self.notebook.add(filter_frame, text=self.get_text('filter_settings'))
-            self._setup_filter_settings(filter_frame)
-
-            advanced_frame = ttk.Frame(self.notebook, padding="10")
-            self.notebook.add(advanced_frame, text=self.get_text('advanced_settings'))
-            self._setup_advanced_settings(advanced_frame)
+            self.pyrad_tab = ttk.Frame(self.notebook, padding="10")
+            pyrad_main_frame = ttk.Frame(self.pyrad_tab)
+            pyrad_main_frame.pack(fill="both", expand=True)
+            self._setup_basic_settings(pyrad_main_frame)
+            self._setup_filter_settings(pyrad_main_frame)
+            self._setup_advanced_settings(pyrad_main_frame)
         
         self._on_feature_type_change()
     
@@ -1477,16 +1350,11 @@ class IntegratedFeatureExtractorGUI:
         cb7.pack(anchor="w", pady=2)
         self.other_feature_checkboxes.append(cb7)
 
-        param_group = ttk.LabelFrame(parent, text=self.get_text('other_feature_settings'), padding="10")
-        param_group.pack(fill="x", pady=5)
-        self.widgets['other_param_group'] = param_group
+        cb8 = ttk.Checkbutton(right_frame, text=self.get_text('enable_dscr'), 
+                            variable=self.enable_other_dscr)
+        cb8.pack(anchor="w", pady=2)
+        self.other_feature_checkboxes.append(cb8)
 
-        csf_frame = ttk.Frame(param_group)
-        csf_frame.pack(fill="x", pady=2)
-        csf_label = ttk.Label(csf_frame, text=self.get_text('csf_label'))
-        csf_label.pack(side="left")
-        self.widgets['csf_label_label'] = csf_label
-        ttk.Entry(csf_frame, textvariable=self.csf_label, width=5).pack(side="left", padx=5)
 
         parallel_frame = ttk.LabelFrame(parent, text=self.get_text('parallel_settings'), padding="10")
         parallel_frame.pack(fill="x", pady=5)
@@ -1518,40 +1386,13 @@ class IntegratedFeatureExtractorGUI:
         control_frame = ttk.Frame(parent)
         control_frame.pack(fill="x", pady=10)
 
-        if PYRADIOMICS_AVAILABLE:
-            param_frame = ttk.LabelFrame(control_frame, text=self.get_text('parameter_management'), padding="5")
-            param_frame.pack(side="left", padx=5)
-            self.widgets['param_frame'] = param_frame
-            
-            save_btn = ttk.Button(param_frame, text=self.get_text('save_params'), 
-                                command=lambda: messagebox.showinfo("提示", "功能开发中"))
-            save_btn.pack(side="left", padx=2)
-            self.widgets['save_btn'] = save_btn
-            
-            load_btn = ttk.Button(param_frame, text=self.get_text('load_params'), 
-                                command=lambda: messagebox.showinfo("提示", "功能开发中"))
-            load_btn.pack(side="left", padx=2)
-            self.widgets['load_btn'] = load_btn
-            
-            reset_btn = ttk.Button(param_frame, text=self.get_text('reset_defaults'), 
-                                command=lambda: messagebox.showinfo("提示", "功能开发中"))
-            reset_btn.pack(side="left", padx=2)
-            self.widgets['reset_btn'] = reset_btn
-
-        exec_frame = ttk.LabelFrame(control_frame, text=self.get_text('execution_control'), padding="5")
-        exec_frame.pack(side="left", padx=5)
-        self.widgets['exec_frame'] = exec_frame
+        start_btn = ttk.Button(control_frame, text="🚀 开始提取", 
+                                command=self.start_extraction)
         
-        start_btn = ttk.Button(exec_frame, text=self.get_text('start_extraction'), 
-                            command=self.start_extraction)
-        start_btn.pack(side="left", padx=2)
+        start_btn.pack(anchor="center")
+        
         self.widgets['start_btn'] = start_btn
-        
-        stop_btn = ttk.Button(exec_frame, text=self.get_text('stop'), 
-                            command=self.stop_extraction)
-        stop_btn.pack(side="left", padx=2)
-        self.widgets['stop_btn'] = stop_btn
-    
+
     def _setup_log_display(self, parent):
         log_frame = ttk.LabelFrame(parent, text=self.get_text('run_log'), padding="5")
         log_frame.pack(fill="both", expand=True, pady=5)
@@ -1560,24 +1401,26 @@ class IntegratedFeatureExtractorGUI:
         self.log_text = scrolledtext.ScrolledText(log_frame, height=10, font=('Consolas', 9), wrap=tk.WORD)
         self.log_text.pack(fill="both", expand=True)
         
-        self.log_text.insert(tk.END, "🎯 椎间盘退变特征提取系统已就绪！\n")
-        self.log_text.insert(tk.END, "📋 支持PyRadiomics和自定义特征提取\n")
+        self.log_text.insert(tk.END, "🎯 椎间盘退变特征提取系统已就绪\n")
     
     def log_message(self, message):
 
-        if '\n' in message:
-            lines = message.split('\n')
-            for line in lines:
-                if line.strip():
-                    timestamp = datetime.now().strftime("%H:%M:%S")
-                    self.log_text.insert(tk.END, f"[{timestamp}] {line}\n")
+        if threading.current_thread() == threading.main_thread():
+            if '\n' in message:
+                lines = message.split('\n')
+                for line in lines:
+                    if line.strip():
+                        timestamp = datetime.now().strftime("%H:%M:%S")
+                        self.log_text.insert(tk.END, f"[{timestamp}] {line}\n")
+            else:
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
+            
+            self.log_text.see(tk.END)
+            if hasattr(self, 'root') and self.root.winfo_exists():
+                self.root.update_idletasks()
         else:
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
-        
-        self.log_text.see(tk.END)
-        if hasattr(self, 'root') and self.root.winfo_exists():
-            self.root.update()
+            self.log_queue.put(message)
     
     def start_extraction(self):
         if not self.input_path.get():
@@ -1596,7 +1439,7 @@ class IntegratedFeatureExtractorGUI:
         self.extraction_thread.daemon = True
         self.extraction_thread.start()
     
-    def extract_other_features(self):
+    def extract_other_features(self, matched_pairs=None):
         results = {}
         
         try:
@@ -1617,7 +1460,11 @@ class IntegratedFeatureExtractorGUI:
                 image_array = self.image_io.sitk_to_numpy(image)
                 mask_array = self.image_io.sitk_to_numpy(mask)
 
-                case_id = Path(image_path).stem
+                p = Path(image_path)
+                base_name = p.name
+                while Path(base_name).suffix:
+                    base_name = Path(base_name).stem
+                case_id = base_name
 
                 result = {
                     'case_id': case_id,
@@ -1654,8 +1501,51 @@ class IntegratedFeatureExtractorGUI:
                         csf_masks = None
 
                 if self.enable_other_dhi.get():
-                    self.log_message("⚠️ DHI计算需要椎体分割，当前简化模式不支持")
-                    result['dhi_note'] = "需要椎体分割"
+                    try:
+                        self.log_message("计算DHI...")
+                        
+                        dhi_results_all_levels = []
+                        
+                        for level_name, labels in self.config.DISC_LABELS.items():
+                            self.log_message(f"处理{level_name}层级")
+                            
+                            upper_masks = []
+                            disc_masks_level = []
+                            lower_masks = []
+                            
+                            for mask_slice in mask_slices:
+                                upper_mask = (mask_slice == labels['upper']).astype(np.uint8)
+                                upper_masks.append(upper_mask)
+                                
+                                disc_mask = (mask_slice == labels['disc']).astype(np.uint8)
+                                disc_masks_level.append(disc_mask)
+                                
+                                lower_mask = (mask_slice == labels['lower']).astype(np.uint8)
+                                lower_masks.append(lower_mask)
+                            
+                            if not any(np.any(mask) for mask in disc_masks_level):
+                                self.log_message(f"{level_name}层级没有找到椎间盘区域，跳过")
+                                continue
+                                
+                            is_l5_s1 = (level_name == 'L5-S1')
+                            dhi_result = self.dhi_calculator.process_multi_slice(
+                                upper_masks, disc_masks_level, lower_masks, is_l5_s1
+                            )
+                            
+                            for key, value in dhi_result.items():
+                                result[f'dhi_{level_name}_{key}'] = value
+                            
+                            self.log_message(f"{level_name} DHI = {dhi_result.get('dhi', 'N/A'):.3f}")
+                            dhi_results_all_levels.append(dhi_result)
+                        
+                        if dhi_results_all_levels:
+                            avg_dhi = np.mean([r['dhi'] for r in dhi_results_all_levels])
+                            result['dhi_average'] = avg_dhi
+                            self.log_message(f"平均DHI = {avg_dhi:.3f}")
+                        
+                    except Exception as e:
+                        self.log_message(f"❌ DHI计算失败: {str(e)}")
+                        result['dhi_error'] = str(e)
 
                 if self.enable_other_asi.get():
                     try:
@@ -1719,7 +1609,8 @@ class IntegratedFeatureExtractorGUI:
                         else:
                             t2si_result = self._calculate_t2si_global(t2si_slices, t2si_roi_masks)
                         
-                        result.update({f't2si_{k}': v for k, v in t2si_result.items()})
+                        serializable_t2si_result = {k: v for k, v in t2si_result.items() if k != 'slice_results'}
+                        result.update({f't2si_{k}': v for k, v in serializable_t2si_result.items()})
                         self.log_message(f"T2SI比率 = {t2si_result.get('si_ratio', 'N/A'):.3f}")
                     except Exception as e:
                         self.log_message(f"❌ T2SI计算失败: {str(e)}")
@@ -1838,6 +1729,54 @@ class IntegratedFeatureExtractorGUI:
                 
                 result['status'] = 'success'
                 results = {'results': [result]}
+
+                if self.enable_other_dscr.get():
+                    try:
+                        self.log_message("计算椎管狭窄率DSCR...")
+                        
+                        dural_sac_masks = []
+                        landmark_masks = []
+                        
+                        for mask_slice in mask_slices:
+                            dural_sac_mask = (mask_slice == self.dural_sac_label.get()).astype(np.uint8)
+                            dural_sac_masks.append(dural_sac_mask)
+                            
+                            landmark_mask = np.zeros_like(mask_slice, dtype=np.uint8)
+                            if hasattr(self.config, 'LANDMARK_LABELS'):
+                                for landmark_name, landmark_label in self.config.LANDMARK_LABELS.items():
+                                    landmark_mask |= (mask_slice == landmark_label).astype(np.uint8)
+                            else:
+                                for label_value in [31, 32, 33, 34, 35, 36]:
+                                    landmark_mask |= (mask_slice == label_value).astype(np.uint8)
+                            
+                            landmark_masks.append(landmark_mask)
+                        
+                        if not any(np.any(mask) for mask in dural_sac_masks):
+                            self.log_message("⚠️ 没有找到硬脊膜囊区域")
+                            result['dscr_note'] = "需要硬脊膜囊标注"
+                        elif not any(np.any(mask) for mask in landmark_masks):
+                            self.log_message("⚠️ 没有找到地标点")
+                            result['dscr_note'] = "需要椎体地标点标注"
+                        else:
+                            for level_name in self.config.DISC_LABELS.keys():
+                                disc_masks_for_dscr = []
+                                for mask_slice in mask_slices:
+                                    disc_mask = (mask_slice == self.config.DISC_LABELS[level_name]['disc']).astype(np.uint8)
+                                    disc_masks_for_dscr.append(disc_mask)
+                                
+                                if any(np.any(mask) for mask in disc_masks_for_dscr):
+                                    dscr_result = self.dscr_calculator.process_multi_slice(
+                                        disc_masks_for_dscr, dural_sac_masks, landmark_masks, level_name
+                                    )
+                                    
+                                    for key, value in dscr_result.items():
+                                        result[f'dscr_{level_name}_{key}'] = value
+                                    
+                                    self.log_message(f"{level_name} DSCR = {dscr_result.get('dscr', 'N/A'):.1f}%")
+                            
+                    except Exception as e:
+                        self.log_message(f"❌ DSCR计算失败: {str(e)}")
+                        result['dscr_error'] = str(e)
                 
             else:
                 input_dir = self.input_path.get()
@@ -1847,77 +1786,301 @@ class IntegratedFeatureExtractorGUI:
                     raise ValueError("请选择输入文件夹和掩码文件夹")
                 
                 self.log_message("开始批量处理...")
-                self.log_message(f"扫描DICOM文件夹: {input_dir}")
-                self.log_message(f"扫描掩码文件夹: {mask_dir}")
-                
-                image_files = self._scan_image_files(input_dir)
-                self.log_message(f"找到 {len(image_files)} 个医学图像文件")
-
-                mask_files = self._scan_mask_files(mask_dir)
-                self.log_message(f"找到 {len(mask_files)} 个掩码文件")
-
-                matched_pairs = self._match_files(image_files, mask_files, input_dir, mask_dir)
-                self.log_message(f"成功匹配 {len(matched_pairs)} 对文件")
                 
                 batch_results = []
                 
-                for idx, (case_id, dicom_path, mask_path, rel_path) in enumerate(matched_pairs):
+                for idx, (case_id, image_path, mask_path, rel_path) in enumerate(matched_pairs):
                     self.log_message(f"\n处理病例 {idx+1}/{len(matched_pairs)}: {case_id}")
-                    
+
                     try:
-                        self.input_path.set(dicom_path)
-                        self.mask_path.set(mask_path)
+                        self.log_message("加载图像和掩码...")
 
-                        original_mode = self.input_type.get()
-                        self.input_type.set("single")
-                        single_result = self.extract_other_features()
-                        self.input_type.set(original_mode)
+                        image, mask = self.image_io.load_image_and_mask(image_path, mask_path)
 
-                        if 'results' in single_result:
-                            for result in single_result['results']:
-                                result['relative_path'] = rel_path
-                            batch_results.extend(single_result['results'])
+                        spacing = list(image.GetSpacing())[::-1]
+                        self.log_message(f"图像间距: {spacing}")
+
+                        image_array = self.image_io.sitk_to_numpy(image)
+                        mask_array = self.image_io.sitk_to_numpy(mask)
+
+
+                        result = {
+                            'case_id': case_id,
+                            'image_path': image_path,
+                            'mask_path': mask_path,
+                            'relative_path': rel_path
+                        }
+
+                        image_slices = self._extract_middle_slices(
+                            image_array, self.config.NUM_SLICES, self.config.SLICE_AXIS
+                        )
+                        mask_slices = self._extract_middle_slices(
+                            mask_array, self.config.NUM_SLICES, self.config.SLICE_AXIS
+                        )
+
+                        roi_masks = []
+                        for mask_slice in mask_slices:
+                            roi_mask = (mask_slice > 0).astype(np.uint8)
+                            roi_masks.append(roi_mask)
+
+                        if not any(np.any(mask) for mask in roi_masks):
+                            self.log_message("⚠️ 没有找到有效的ROI区域")
+                            result['status'] = 'no_roi_found'
+                            return {'results': [result]}
+
+                        csf_masks = []
+                        if self.enable_other_asi.get() or self.enable_other_t2si.get():
+                            csf_label = self.csf_label.get()
+                            for mask_slice in mask_slices:
+                                csf_mask = (mask_slice == csf_label).astype(np.uint8)
+                                csf_masks.append(csf_mask)
+
+                            if not any(np.any(mask) for mask in csf_masks):
+                                self.log_message("⚠️ 没有找到CSF区域，ASI/T2SI将使用全局标准化")
+                                csf_masks = None
+
+                        if self.enable_other_dhi.get():
+                            try:
+                                self.log_message("计算DHI...")
+                                
+                                dhi_results_all_levels = []
+                                
+                                for level_name, labels in self.config.DISC_LABELS.items():
+                                    self.log_message(f"处理{level_name}层级")
+                                    
+                                    upper_masks = []
+                                    disc_masks_level = []
+                                    lower_masks = []
+                                    
+                                    for mask_slice in mask_slices:
+                                        upper_mask = (mask_slice == labels['upper']).astype(np.uint8)
+                                        upper_masks.append(upper_mask)
+                                        
+                                        disc_mask = (mask_slice == labels['disc']).astype(np.uint8)
+                                        disc_masks_level.append(disc_mask)
+                                        
+                                        lower_mask = (mask_slice == labels['lower']).astype(np.uint8)
+                                        lower_masks.append(lower_mask)
+                                    
+                                    if not any(np.any(mask) for mask in disc_masks_level):
+                                        self.log_message(f"{level_name}层级没有找到椎间盘区域，跳过")
+                                        continue
+                                        
+                                    is_l5_s1 = (level_name == 'L5-S1')
+                                    dhi_result = self.dhi_calculator.process_multi_slice(
+                                        upper_masks, disc_masks_level, lower_masks, is_l5_s1
+                                    )
+                                    
+                                    for key, value in dhi_result.items():
+                                        result[f'dhi_{level_name}_{key}'] = value
+                                    
+                                    self.log_message(f"{level_name} DHI = {dhi_result.get('dhi', 'N/A'):.3f}")
+                                    dhi_results_all_levels.append(dhi_result)
+                                
+                                if dhi_results_all_levels:
+                                    avg_dhi = np.mean([r['dhi'] for r in dhi_results_all_levels])
+                                    result['dhi_average'] = avg_dhi
+                                    self.log_message(f"平均DHI = {avg_dhi:.3f}")
+                                
+                            except Exception as e:
+                                self.log_message(f"❌ DHI计算失败: {str(e)}")
+                                result['dhi_error'] = str(e)
+
+                        if self.enable_other_asi.get():
+                            try:
+                                self.log_message("计算ASI...")
+                                asi_slices = []
+                                asi_roi_masks = []
+                                asi_csf_masks = []
+                                
+                                for i, (img_slice, roi_mask) in enumerate(zip(image_slices, roi_masks)):
+                                    slice_spacing = spacing[:2] + [1.0]
+                                    processed_img, processed_mask = self.preprocessor.preprocess_for_signal_intensity(
+                                        img_slice, roi_mask, slice_spacing
+                                    )
+                                    asi_slices.append(processed_img)
+                                    asi_roi_masks.append(processed_mask)
+                                    
+                                    if csf_masks:
+                                        _, processed_csf = self.preprocessor.preprocess_for_signal_intensity(
+                                            img_slice, csf_masks[i], slice_spacing
+                                        )
+                                        asi_csf_masks.append(processed_csf)
+                                
+                                if csf_masks:
+                                    asi_result = self.asi_calculator.process_multi_slice(
+                                        asi_slices, asi_roi_masks, asi_csf_masks
+                                    )
+                                else:
+                                    asi_result = self._calculate_asi_without_csf(asi_slices, asi_roi_masks)
+                                
+                                result.update({f'asi_{k}': v for k, v in asi_result.items()})
+                                self.log_message(f"ASI = {asi_result.get('asi', 'N/A'):.2f}")
+                            except Exception as e:
+                                self.log_message(f"❌ ASI计算失败: {str(e)}")
+                                result['asi_error'] = str(e)
+
+                        if self.enable_other_t2si.get():
+                            try:
+                                self.log_message("计算T2信号强度...")
+                                t2si_slices = []
+                                t2si_roi_masks = []
+                                t2si_csf_masks = []
+                                
+                                for i, (img_slice, roi_mask) in enumerate(zip(image_slices, roi_masks)):
+                                    slice_spacing = spacing[:2] + [1.0]
+                                    processed_img, processed_mask = self.preprocessor.preprocess_for_signal_intensity(
+                                        img_slice, roi_mask, slice_spacing
+                                    )
+                                    t2si_slices.append(processed_img)
+                                    t2si_roi_masks.append(processed_mask)
+                                    
+                                    if csf_masks:
+                                        _, processed_csf = self.preprocessor.preprocess_for_signal_intensity(
+                                            img_slice, csf_masks[i], slice_spacing
+                                        )
+                                        t2si_csf_masks.append(processed_csf)
+                                
+                                if csf_masks:
+                                    t2si_result = self.t2si_calculator.process_multi_slice(
+                                        t2si_slices, t2si_roi_masks, t2si_csf_masks
+                                    )
+                                else:
+                                    t2si_result = self._calculate_t2si_global(t2si_slices, t2si_roi_masks)
+                                
+                                serializable_t2si_result = {k: v for k, v in t2si_result.items() if k != 'slice_results'}
+                                result.update({f't2si_{k}': v for k, v in serializable_t2si_result.items()})
+                                self.log_message(f"T2SI比率 = {t2si_result.get('si_ratio', 'N/A'):.3f}")
+                            except Exception as e:
+                                self.log_message(f"❌ T2SI计算失败: {str(e)}")
+                                result['t2si_error'] = str(e)
                         
+                        if self.enable_other_fd.get():
+                            try:
+                                self.log_message("计算分形维度...")
+                                fd_slices = []
+                                fd_masks = []
+                                
+                                for img_slice, roi_mask in zip(image_slices, roi_masks):
+                                    slice_spacing = spacing[:2] + [1.0]
+                                    edges, processed_mask = self.preprocessor.preprocess_for_fractal(
+                                        img_slice, roi_mask, slice_spacing
+                                    )
+                                    fd_slices.append(edges)
+                                    fd_masks.append(processed_mask)
+                                
+                                fd_result = self.fd_calculator.process_multi_slice(
+                                    fd_slices, fd_masks
+                                )
+                                result.update({f'fd_{k}': v for k, v in fd_result.items()})
+                                self.log_message(f"FD = {fd_result.get('fd', 'N/A'):.3f}")
+                            except Exception as e:
+                                self.log_message(f"❌ FD计算失败: {str(e)}")
+                                result['fd_error'] = str(e)
+
+                        if self.enable_other_gabor.get():
+                            try:
+                                self.log_message("计算Gabor特征...")
+                                gabor_slices = []
+                                gabor_masks = []
+                                
+                                for img_slice, roi_mask in zip(image_slices, roi_masks):
+                                    slice_spacing = spacing[:2] + [1.0]
+                                    processed_img, processed_mask = self.preprocessor.preprocess_for_texture(
+                                        img_slice, roi_mask, slice_spacing
+                                    )
+                                    gabor_slices.append(processed_img)
+                                    gabor_masks.append(processed_mask)
+
+                                gabor_features = {}
+                                for i, (img, mask) in enumerate(zip(gabor_slices, gabor_masks)):
+                                    slice_features = self.gabor_calculator.calculate(img, mask)
+                                    for k, v in slice_features.items():
+                                        if k in gabor_features:
+                                            gabor_features[k].append(v)
+                                        else:
+                                            gabor_features[k] = [v]
+
+                                gabor_result = {k: np.mean(v) for k, v in gabor_features.items()}
+                                result.update({f'gabor_{k}': v for k, v in gabor_result.items()})
+                                self.log_message(f"提取了 {len(gabor_result)} 个Gabor特征")
+                            except Exception as e:
+                                self.log_message(f"❌ Gabor计算失败: {str(e)}")
+                                result['gabor_error'] = str(e)
+
+                        if self.enable_other_hu.get():
+                            try:
+                                self.log_message("计算Hu不变矩...")
+                                hu_masks = []
+                                
+                                for roi_mask in roi_masks:
+                                    slice_spacing = spacing[:2] + [1.0]
+                                    binary_mask = self.preprocessor.preprocess_for_shape(
+                                        roi_mask, slice_spacing
+                                    )
+                                    hu_masks.append(binary_mask)
+
+                                hu_features = {}
+                                for i, mask in enumerate(hu_masks):
+                                    slice_features = self.hu_calculator.calculate(mask, mask)
+                                    for k, v in slice_features.items():
+                                        if k in hu_features:
+                                            hu_features[k].append(v)
+                                        else:
+                                            hu_features[k] = [v]
+
+                                hu_result = {k: np.mean(v) for k, v in hu_features.items()}
+                                result.update({f'hu_{k}': v for k, v in hu_result.items()})
+                                self.log_message(f"提取了 {len(hu_result)} 个Hu矩特征")
+                            except Exception as e:
+                                self.log_message(f"❌ Hu矩计算失败: {str(e)}")
+                                result['hu_error'] = str(e)
+
+                        if self.enable_other_texture.get():
+                            try:
+                                self.log_message("计算扩展纹理特征...")
+                                texture_slices = []
+                                texture_masks = []
+                                
+                                for img_slice, roi_mask in zip(image_slices, roi_masks):
+                                    slice_spacing = spacing[:2] + [1.0]
+                                    processed_img, processed_mask = self.preprocessor.preprocess_for_texture(
+                                        img_slice, roi_mask, slice_spacing
+                                    )
+                                    texture_slices.append(processed_img)
+                                    texture_masks.append(processed_mask)
+
+                                texture_features = {}
+                                for i, (img, mask) in enumerate(zip(texture_slices, texture_masks)):
+                                    slice_features = self.texture_calculator.calculate(img, mask)
+                                    for k, v in slice_features.items():
+                                        if k in texture_features:
+                                            texture_features[k].append(v)
+                                        else:
+                                            texture_features[k] = [v]
+
+                                texture_result = {k: np.mean(v) for k, v in texture_features.items()}
+                                result.update({f'texture_{k}': v for k, v in texture_result.items()})
+                                self.log_message(f"提取了 {len(texture_result)} 个纹理特征")
+                            except Exception as e:
+                                self.log_message(f"❌ 纹理特征计算失败: {str(e)}")
+                                result['texture_error'] = str(e)
+                        
+                        result['status'] = 'success'
+                        batch_results.append(result)
+
                     except Exception as e:
                         self.log_message(f"❌ 处理失败: {str(e)}")
                         batch_results.append({
                             'case_id': case_id,
-                            'relative_path': rel_path,
                             'status': 'failed',
-                            'error': str(e)
-                        })
-                
-                if not all(col in df.columns for col in required_cols):
-                    raise ValueError(f"CSV文件必须包含以下列: {required_cols}")
-                
-                batch_results = []
-                
-                for idx, row in df.iterrows():
-                    self.log_message(f"\n处理病例 {idx+1}/{len(df)}: {row['case_id']}")
-                    
-                    try:
-                        self.input_path.set(row['image_path'])
-                        self.mask_path.set(row['segmentation_path'])
-
-                        original_mode = self.input_type.get()
-                        self.input_type.set("single")
-                        single_result = self.extract_other_features()
-                        self.input_type.set(original_mode)
-
-                        if 'results' in single_result:
-                            batch_results.extend(single_result['results'])
-                        
-                    except Exception as e:
-                        self.log_message(f"❌ 处理失败: {str(e)}")
-                        batch_results.append({
-                            'case_id': row['case_id'],
-                            'status': 'failed',
-                            'error': str(e)
+                            'error': str(e),
+                            'relative_path': rel_path
                         })
                 
                 results = {
                     'batch_mode': True,
-                    'total_cases': len(df),
+                    'total_cases': len(matched_pairs),
                     'results': batch_results
                 }
             
@@ -1935,10 +2098,27 @@ class IntegratedFeatureExtractorGUI:
             
             source = self.feature_type.get()
             all_results = []
+            matched_pairs = None
+
+            if self.input_type.get() == "batch":
+                input_dir = self.input_path.get()
+                mask_dir = self.mask_path.get()
+                self.log_message(f"扫描图像文件夹: {input_dir}")
+                self.log_message(f"扫描掩码文件夹: {mask_dir}")
+                
+                image_files = self._scan_image_files(input_dir)
+                mask_files = self._scan_mask_files(mask_dir)
+                matched_pairs = self._match_files(image_files, mask_files, input_dir, mask_dir)
+
+                if not matched_pairs:
+                    self.log_message("⚠️ 未找到任何匹配的 图像/掩码 文件对。处理中止。")
+                    messagebox.showwarning("警告", "未找到任何匹配的 图像/掩码 文件对。")
+                    return
+                self.log_message(f"成功匹配 {len(matched_pairs)} 对文件。")
 
             if source in ["other", "both"]:
                 self.log_message(self.get_text('processing_other'))
-                other_results = self.extract_other_features()
+                other_results = self.extract_other_features(matched_pairs)
                 
                 if 'error' in other_results:
                     self.log_message(f"❌ 自定义特征提取失败: {other_results['error']}")
@@ -1951,7 +2131,7 @@ class IntegratedFeatureExtractorGUI:
 
             if source in ["pyradiomics", "both"] and PYRADIOMICS_AVAILABLE:
                 self.log_message("🔄 处理PyRadiomics特征...")
-                pyrad_results = self.extract_pyradiomics_features()
+                pyrad_results = self.extract_pyradiomics_features(matched_pairs)
                 
                 if 'error' in pyrad_results:
                     self.log_message(f"❌ PyRadiomics特征提取失败: {pyrad_results['error']}")
@@ -1966,7 +2146,8 @@ class IntegratedFeatureExtractorGUI:
                     self.log_message("✅ PyRadiomics特征提取完成")
 
             if all_results:
-                self.save_results({'results': all_results})
+                is_batch = self.input_type.get() == "batch"
+                self.save_results({'results': all_results, 'batch_mode': is_batch, 'total_cases': len(all_results)})
                 self.log_message("🎉 所有特征提取完成！")
             else:
                 self.log_message("⚠️ 没有提取到任何特征")
@@ -1993,6 +2174,33 @@ class IntegratedFeatureExtractorGUI:
             else:
                 other_results.append(pyrad_result)
 
+    def _convert_to_long_format(self, wide_df: pd.DataFrame) -> pd.DataFrame:
+        """将宽格式数据转换为长格式"""
+        long_results = []
+        
+        for _, row in wide_df.iterrows():
+            case_id = row.get('case_id', 'unknown')
+            
+            for level_name in self.config.DISC_LABELS.keys():
+                level_row = {
+                    'Sample_ID': case_id,
+                    'Disc_Level': level_name
+                }
+                
+                for col in row.index:
+                    if col == 'case_id' or col == 'status':
+                        continue
+                        
+                    if level_name in col:
+                        feature_name = col.replace(f'_{level_name}', '').replace(f'{level_name}_', '')
+                        level_row[feature_name] = row[col]
+                    elif not any(lvl in col for lvl in self.config.DISC_LABELS.keys()):
+                        level_row[col] = row[col]
+                
+                long_results.append(level_row)
+        
+        return pd.DataFrame(long_results)
+
     def save_results(self, results):
         output_path = self.output_path.get()
         
@@ -2011,77 +2219,42 @@ class IntegratedFeatureExtractorGUI:
         try:
             df = pd.DataFrame(results['results'])
 
-            if self.input_type.get() == "single":
-                if not os.path.exists(output_path):
-                    os.makedirs(output_path, exist_ok=True)
-                
-                case_id = results['results'][0].get('case_id', 'unknown')
+            cols_to_remove = [
+                'image_path', 'mask_path', 'relative_path', 'status',
+                'num_features', 'num_pyradiomics_features', 'diagnostics',
+                't2si_roi_method', 'fd_r_squared', 't2si_num_slices',
+                't2si_mean_roi_size'
+            ]
+            
+            for col in df.columns:
+                if (col.endswith('_error') or 
+                    col.endswith('_note') or 
+                    col.endswith('_valid_slices')):
+                    if col not in cols_to_remove:
+                        cols_to_remove.append(col)
 
-                excel_file = os.path.join(output_path, f"{case_id}_features.xlsx")
-                with pd.ExcelWriter(excel_file, engine='openpyxl') as writer:
-                    df.to_excel(writer, sheet_name='特征数据', index=False)
+            df_features_only = df.drop(columns=cols_to_remove, errors='ignore')
 
-                    stats_df = self._generate_feature_statistics(df)
-                    if stats_df is not None:
-                        stats_df.to_excel(writer, sheet_name='特征统计', index=False)
-                
-                self.log_message(f"💾 Excel结果已保存到: {excel_file}")
 
-                csv_file = os.path.join(output_path, f"{case_id}_features.csv")
-                df.to_csv(csv_file, index=False)
-                self.log_message(f"💾 CSV结果已保存到: {csv_file}")
+            if hasattr(self, 'output_format') and self.output_format.get() == 'long':
+                df_features_only = self._convert_to_long_format(df_features_only)
 
-                json_file = os.path.join(output_path, f"{case_id}_features.json")
-                df.to_json(json_file, orient='records', indent=2)
-                
+            if not os.path.isdir(output_path):
+                output_dir = os.path.dirname(output_path)
             else:
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                
-                if output_path.endswith('.csv'):
-                    df.to_csv(output_path, index=False)
-                    self.log_message(f"💾 结果已保存到: {output_path}")
-                elif output_path.endswith('.xlsx'):
-                    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                        df.to_excel(writer, sheet_name='特征数据', index=False)
+                output_dir = output_path
 
-                        stats_df = self._generate_batch_statistics(df)
-                        if stats_df is not None:
-                            stats_df.to_excel(writer, sheet_name='统计摘要', index=False)
-                    
-                    self.log_message(f"💾 结果已保存到: {output_path}")
-                else:
-                    if not os.path.exists(output_path):
-                        os.makedirs(output_path, exist_ok=True)
+            os.makedirs(output_dir, exist_ok=True)
 
-                    if 'relative_path' in df.columns:
-                        for rel_path, group_df in df.groupby('relative_path'):
-                            if rel_path and rel_path != '.':
-                                output_subdir = os.path.join(output_path, rel_path)
-                                os.makedirs(output_subdir, exist_ok=True)
-                            else:
-                                output_subdir = output_path
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-                            csv_file = os.path.join(output_subdir, f"features_{timestamp}.csv")
-                            group_df.to_csv(csv_file, index=False)
-                            self.log_message(f"💾 保存到: {csv_file}")
+            new_filename = f"features_{timestamp}.csv"
 
-                    summary_file = os.path.join(output_path, f"all_features_{timestamp}.csv")
-                    df.to_csv(summary_file, index=False)
-                    self.log_message(f"💾 汇总结果保存到: {summary_file}")
+            final_csv_path = os.path.join(output_dir, new_filename)
 
-                    excel_file = os.path.join(output_path, f"all_features_{timestamp}.xlsx")
-                    with pd.ExcelWriter(excel_file, engine='openpyxl') as writer:
-                        df.to_excel(writer, sheet_name='特征数据', index=False)
-                        
-                        stats_df = self._generate_batch_statistics(df)
-                        if stats_df is not None:
-                            stats_df.to_excel(writer, sheet_name='统计摘要', index=False)
-                    
-                    self.log_message(f"💾 Excel结果保存到: {excel_file}")
+            df_features_only.to_csv(final_csv_path, index=False)
 
-                    csv_file = os.path.join(output_path, f"batch_features_{timestamp}.csv")
-                    df.to_csv(csv_file, index=False)
-                    self.log_message(f"💾 CSV结果已保存到: {csv_file}")
+            self.log_message(f"💾 结果已保存到: {final_csv_path}")
 
             messagebox.showinfo("完成", "特征提取和保存完成！")
             
@@ -2153,13 +2326,18 @@ class IntegratedFeatureExtractorGUI:
         return pd.DataFrame(stats) if stats else None
 
     def _extract_middle_slices(self, array: np.ndarray, num_slices: int, axis: int) -> List[np.ndarray]:
-
         size = array.shape[axis]
         middle = size // 2
-        half_num = num_slices // 2
         
-        start_idx = max(0, middle - half_num)
-        end_idx = min(size, start_idx + num_slices)
+        if num_slices % 2 == 0:
+            start_idx = middle - num_slices // 2
+            end_idx = middle + num_slices // 2
+        else:
+            start_idx = middle - num_slices // 2
+            end_idx = middle + num_slices // 2 + 1
+        
+        start_idx = max(0, start_idx)
+        end_idx = min(size, end_idx)
         
         slices = []
         for i in range(start_idx, end_idx):
@@ -2221,7 +2399,7 @@ class IntegratedFeatureExtractorGUI:
         
         return result
     
-    def extract_pyradiomics_features(self):
+    def extract_pyradiomics_features(self, matched_pairs=None):
         if not PYRADIOMICS_AVAILABLE:
             self.log_message("❌ PyRadiomics不可用")
             return {'error': 'PyRadiomics not available'}
@@ -2260,16 +2438,10 @@ class IntegratedFeatureExtractorGUI:
                     extractor.enableFeatureClassByName('ngtdm')
 
                 if self.enable_log.get():
-                    sigma_values = [float(s.strip()) for s in self.log_sigma.get().split(',')]
-                    extractor.enableImageTypeByName('LoG', otherArgs={'sigma': sigma_values})
-                
+                    extractor.enableImageTypeByName('LoG')
+
                 if self.enable_wavelet.get():
-                    wavelet_args = {
-                        'level': self.wavelet_level.get(),
-                        'start_level': self.wavelet_start_level.get(),
-                        'wavelet': self.wavelet_type.get()
-                    }
-                    extractor.enableImageTypeByName('Wavelet', otherArgs=wavelet_args)
+                    extractor.enableImageTypeByName('Wavelet')
                 
                 if self.enable_square.get():
                     extractor.enableImageTypeByName('Square')
@@ -2280,24 +2452,13 @@ class IntegratedFeatureExtractorGUI:
                 if self.enable_exponential.get():
                     extractor.enableImageTypeByName('Exponential')
                 if self.enable_gradient.get():
-                    gradient_args = {'gradientUsingSpacing': self.gradient_sigma.get()}
-                    extractor.enableImageTypeByName('Gradient', otherArgs=gradient_args)
+                    extractor.enableImageTypeByName('Gradient')
                 
                 if self.enable_lbp2d.get():
-                    lbp2d_args = {
-                        'lbpRadius': self.lbp2d_radius.get(),
-                        'lbpSamples': self.lbp2d_samples.get(),
-                        'lbpMethod': self.lbp2d_method.get()
-                    }
-                    extractor.enableImageTypeByName('LBP2D', otherArgs=lbp2d_args)
+                    extractor.enableImageTypeByName('LBP2D')
                 
                 if self.enable_lbp3d.get():
-                    lbp3d_args = {
-                        'lbp3DLevels': self.lbp3d_levels.get(),
-                        'lbp3DIcosphereRadius': self.lbp3d_icosphere_radius.get(),
-                        'lbp3DIcosphereSubdivision': self.lbp3d_icosphere_subdivision.get()
-                    }
-                    extractor.enableImageTypeByName('LBP3D', otherArgs=lbp3d_args)
+                    extractor.enableImageTypeByName('LBP3D')
                 
                 self.log_message("提取PyRadiomics特征...")
 
@@ -2315,7 +2476,11 @@ class IntegratedFeatureExtractorGUI:
                             value = value.tolist() if isinstance(value, np.ndarray) else value.item()
                         pyrad_features[key] = value
 
-                case_id = Path(image_path).stem
+                p = Path(image_path)
+                base_name = p.name
+                while Path(base_name).suffix:
+                    base_name = Path(base_name).stem
+                case_id = base_name
                 
                 result = {
                     'case_id': case_id,
@@ -2333,35 +2498,26 @@ class IntegratedFeatureExtractorGUI:
                 
                 results = {'results': [result]}
                 
-            else:
-                csv_path = self.input_path.get()
-                if not csv_path:
-                    raise ValueError("请选择批量处理CSV文件")
+            else: 
+                input_dir = self.input_path.get()
+                mask_dir = self.mask_path.get()
+                
+                if not input_dir or not mask_dir:
+                    raise ValueError("请选择输入文件夹和掩码文件夹")
                 
                 self.log_message("开始PyRadiomics批量处理...")
 
-                df = pd.read_csv(csv_path)
-                required_cols = ['case_id', 'image_path', 'segmentation_path']
-                
-                if not all(col in df.columns for col in required_cols):
-                    raise ValueError(f"CSV文件必须包含以下列: {required_cols}")
-
                 params = self._create_pyradiomics_params()
                 extractor = featureextractor.RadiomicsFeatureExtractor(**params)
-
                 self._configure_extractor(extractor)
                 
                 batch_results = []
                 
-                for idx, row in df.iterrows():
-                    self.log_message(f"\n处理病例 {idx+1}/{len(df)}: {row['case_id']}")
+                for idx, (case_id, image_path, mask_path, rel_path) in enumerate(matched_pairs):
+                    self.log_message(f"\n处理病例 {idx+1}/{len(matched_pairs)}: {case_id}")
                     
                     try:
-                        feature_vector = extractor.execute(
-                            row['image_path'], 
-                            row['segmentation_path'], 
-                            label=self.label.get()
-                        )
+                        feature_vector = extractor.execute(image_path, mask_path, label=self.label.get())
 
                         pyrad_features = {}
                         for key, value in feature_vector.items():
@@ -2371,26 +2527,28 @@ class IntegratedFeatureExtractorGUI:
                                 pyrad_features[key] = value
                         
                         result = {
-                            'case_id': row['case_id'],
+                            'case_id': case_id,
                             'status': 'success',
-                            'num_features': len(pyrad_features)
+                            'num_features': len(pyrad_features),
+                            'relative_path': rel_path
                         }
                         result.update(pyrad_features)
                         
                         batch_results.append(result)
-                        self.log_message(f"✅ 成功提取 {len(pyrad_features)} 个特征")
+                        self.log_message(f"✅ 成功提取 {len(pyrad_features)} 个PyRadiomics特征")
                         
                     except Exception as e:
                         self.log_message(f"❌ 处理失败: {str(e)}")
                         batch_results.append({
-                            'case_id': row['case_id'],
+                            'case_id': case_id,
                             'status': 'failed',
-                            'error': str(e)
+                            'error': str(e),
+                            'relative_path': rel_path
                         })
                 
                 results = {
                     'batch_mode': True,
-                    'total_cases': len(df),
+                    'total_cases': len(matched_pairs),
                     'results': batch_results
                 }
             
@@ -2403,61 +2561,99 @@ class IntegratedFeatureExtractorGUI:
             return {'error': str(e)}
 
     def _create_pyradiomics_params(self):
-        params = {
-            'binWidth': self.bin_width.get() if self.bin_width.get() > 0 else None,
-            'binCount': self.bin_count.get() if self.bin_count.get() > 0 else None,
-            'normalize': self.normalize.get(),
-            'normalizeScale': self.normalize_scale.get(),
-            'removeOutliers': self.remove_outliers.get() if self.remove_outliers.get() > 0 else None,
-            'correctMask': self.correct_mask.get(),
-            'interpolator': self.interpolator.get(),
-            'padDistance': self.pad_distance.get(),
-            'geometryTolerance': float(self.geometry_tolerance.get()),
-            'additionalInfo': self.additional_info.get(),
-            'enableCExtensions': self.enable_c_extensions.get(),
-            'minimumROIDimensions': self.minimum_roi_dimensions.get(),
-            'minimumROISize': self.minimum_roi_size.get(),
-            'preCrop': self.preCrop.get(),
-            'voxelArrayShift': self.voxel_array_shift.get()
-        }
+            params = {
+                'binWidth': self.bin_width.get() if self.bin_width.get() > 0 else None,
+                'binCount': self.bin_count.get() if self.bin_count.get() > 0 else None,
+                'normalize': self.normalize.get(),
+                'normalizeScale': self.normalize_scale.get(),
+                'removeOutliers': self.remove_outliers.get() if self.remove_outliers.get() > 0 else None,
+                'correctMask': self.correct_mask.get(),
+                'interpolator': self.interpolator.get(),
+                'padDistance': self.pad_distance.get(),
+                'geometryTolerance': float(self.geometry_tolerance.get()),
+                'additionalInfo': self.additional_info.get(),
+                'enableCExtensions': self.enable_c_extensions.get(),
+                'minimumROIDimensions': self.minimum_roi_dimensions.get(),
+                'minimumROISize': self.minimum_roi_size.get(),
+                'preCrop': self.preCrop.get(),
+                'voxelArrayShift': self.voxel_array_shift.get()
+            }
 
-        if self.resample_spacing.get():
-            spacing = [float(s.strip()) for s in self.resample_spacing.get().split(',')]
-            params['resampledPixelSpacing'] = spacing
+            if self.resample_spacing.get():
+                spacing = [float(s.strip()) for s in self.resample_spacing.get().split(',')]
+                params['resampledPixelSpacing'] = spacing
 
-        if self.force2D.get():
-            params['force2D'] = True
-            params['force2Ddimension'] = self.force2D_dimension.get()
-            params['force2DExtraction'] = self.force2D_aggregator.get()
+            if self.force2D.get():
+                params['force2D'] = True
+                params['force2Ddimension'] = self.force2D_dimension.get()
+                params['force2DExtraction'] = self.force2D_aggregator.get()
 
-        if self.distances.get():
-            distances = [int(d.strip()) for d in self.distances.get().split(',')]
-            params['distances'] = distances
-        
-        params['weightingNorm'] = self.weighting_norm.get() if self.weighting_norm.get() != 'no_weighting' else None
-        params['symmetricalGLCM'] = self.symmetrical_glcm.get()
-        
-        if self.gldm_a.get() > 0:
-            params['gldm_a'] = self.gldm_a.get()
+            if self.distances.get():
+                distances = [int(d.strip()) for d in self.distances.get().split(',')]
+                params['distances'] = distances
+            
+            params['weightingNorm'] = self.weighting_norm.get() if self.weighting_norm.get() != 'no_weighting' else None
+            params['symmetricalGLCM'] = self.symmetrical_glcm.get()
+            
+            if self.gldm_a.get() > 0:
+                params['gldm_a'] = self.gldm_a.get()
 
-        if self.resegment_range.get():
-            try:
-                range_values = [float(v.strip()) for v in self.resegment_range.get().split(',')]
-                params['resegmentRange'] = range_values
-                params['resegmentMode'] = self.resegment_mode.get()
-                params['resegmentShape'] = self.resegment_shape.get()
-            except:
-                self.log_message("⚠️ 重分割范围格式错误，跳过重分割设置")
+            if self.resegment_range.get():
+                try:
+                    range_values = [float(v.strip()) for v in self.resegment_range.get().split(',')]
+                    params['resegmentRange'] = range_values
+                    params['resegmentMode'] = self.resegment_mode.get()
+                    params['resegmentShape'] = self.resegment_shape.get()
+                except:
+                    self.log_message("⚠️ 重分割范围格式错误，跳过重分割设置")
 
-        if hasattr(self, 'kernel_radius'):
-            params['kernelRadius'] = self.kernel_radius.get()
-            params['maskedKernel'] = self.masked_kernel.get()
-            params['initValue'] = float(self.init_value.get()) if self.init_value.get() else 0
-            params['voxelBatch'] = self.voxel_batch.get() if self.voxel_batch.get() > 0 else -1
+            if hasattr(self, 'kernel_radius'):
+                params['kernelRadius'] = self.kernel_radius.get()
+                params['maskedKernel'] = self.masked_kernel.get()
+                params['initValue'] = float(self.init_value.get()) if self.init_value.get() else 0
+                params['voxelBatch'] = self.voxel_batch.get() if self.voxel_batch.get() > 0 else -1
 
-        params = {k: v for k, v in params.items() if v is not None}
-        
-        return params
+            params['imageType'] = {}
+            if self.enable_log.get():
+                sigma_values = [float(s.strip()) for s in self.log_sigma.get().split(',')]
+                params['imageType']['LoG'] = {'sigma': sigma_values}
+            
+            if self.enable_wavelet.get():
+                params['imageType']['Wavelet'] = {
+                    'level': self.wavelet_level.get(),
+                    'start_level': self.wavelet_start_level.get(),
+                    'wavelet': self.wavelet_type.get()
+                }
+
+            if self.enable_square.get():
+                params['imageType']['Square'] = {}
+            if self.enable_square_root.get():
+                params['imageType']['SquareRoot'] = {}
+            if self.enable_logarithm.get():
+                params['imageType']['Logarithm'] = {}
+            if self.enable_exponential.get():
+                params['imageType']['Exponential'] = {}
+            
+            if self.enable_gradient.get():
+                params['imageType']['Gradient'] = {'gradientUsingSpacing': self.gradient_sigma.get()}
+            
+            if self.enable_lbp2d.get():
+                params['imageType']['LBP2D'] = {
+                    'radius': self.lbp2d_radius.get(),
+                    'samples': self.lbp2d_samples.get(),
+                    'method': self.lbp2d_method.get()
+                }
+            
+            if self.enable_lbp3d.get():
+                params['imageType']['LBP3D'] = {
+                    'levels': self.lbp3d_levels.get(),
+                    'icosphereRadius': self.lbp3d_icosphere_radius.get(),
+                    'icosphereSubdivision': self.lbp3d_icosphere_subdivision.get()
+                }
+            
+            params = {k: v for k, v in params.items() if v is not None}
+            
+            return params
 
     def _configure_extractor(self, extractor):
         if self.enable_shape.get():
@@ -2478,16 +2674,10 @@ class IntegratedFeatureExtractorGUI:
             extractor.enableFeatureClassByName('ngtdm')
 
         if self.enable_log.get():
-            sigma_values = [float(s.strip()) for s in self.log_sigma.get().split(',')]
-            extractor.enableImageTypeByName('LoG', otherArgs={'sigma': sigma_values})
-        
+            extractor.enableImageTypeByName('LoG')
+
         if self.enable_wavelet.get():
-            wavelet_args = {
-                'level': self.wavelet_level.get(),
-                'start_level': self.wavelet_start_level.get(),
-                'wavelet': self.wavelet_type.get()
-            }
-            extractor.enableImageTypeByName('Wavelet', otherArgs=wavelet_args)
+            extractor.enableImageTypeByName('Wavelet')
         
         if self.enable_square.get():
             extractor.enableImageTypeByName('Square')
@@ -2498,49 +2688,22 @@ class IntegratedFeatureExtractorGUI:
         if self.enable_exponential.get():
             extractor.enableImageTypeByName('Exponential')
         if self.enable_gradient.get():
-            gradient_args = {'gradientUsingSpacing': self.gradient_sigma.get()}
-            extractor.enableImageTypeByName('Gradient', otherArgs=gradient_args)
+            extractor.enableImageTypeByName('Gradient')
         
         if self.enable_lbp2d.get():
-            lbp2d_args = {
-                'lbpRadius': self.lbp2d_radius.get(),
-                'lbpSamples': self.lbp2d_samples.get(),
-                'lbpMethod': self.lbp2d_method.get()
-            }
-            extractor.enableImageTypeByName('LBP2D', otherArgs=lbp2d_args)
+            extractor.enableImageTypeByName('LBP2D')
         
         if self.enable_lbp3d.get():
-            lbp3d_args = {
-                'lbp3DLevels': self.lbp3d_levels.get(),
-                'lbp3DIcosphereRadius': self.lbp3d_icosphere_radius.get(),
-                'lbp3DIcosphereSubdivision': self.lbp3d_icosphere_subdivision.get()
-            }
-            extractor.enableImageTypeByName('LBP3D', otherArgs=lbp3d_args)
+            extractor.enableImageTypeByName('LBP3D')
     
-    def save_results(self, results):
-        output_path = self.output_path.get()
-
-        df = pd.DataFrame([results])
-
-        if output_path.endswith('.csv'):
-            df.to_csv(output_path, index=False)
-        else:
-            os.makedirs(output_path, exist_ok=True)
-            df.to_csv(os.path.join(output_path, "features.csv"), index=False)
-        
-        self.log_message(f"💾 结果已保存到: {output_path}")
-    
-    def stop_extraction(self):
-        self.log_message("⏹ 停止请求已发送...")
-        messagebox.showinfo("提示", "当前版本不支持中途停止，请等待处理完成")
 
     def select_input(self):
         if self.input_type.get() == "single":
             path = filedialog.askopenfilename(
                 title=self.get_text('select_input_file'),
                 filetypes=[
-                    ("DICOM文件", "*.dcm"),
                     ("NIfTI文件", "*.nii *.nii.gz"),
+                    ("DICOM文件", "*.dcm"),
                     ("NRRD文件", "*.nrrd"),
                     ("MHA/MHD文件", "*.mha *.mhd"),
                     ("所有支持格式", "*.dcm *.nii *.nii.gz *.nrrd *.mha *.mhd"),
@@ -2561,8 +2724,8 @@ class IntegratedFeatureExtractorGUI:
             path = filedialog.askopenfilename(
                 title=self.get_text('select_mask_file'),
                 filetypes=[
-                    ("DICOM文件", "*.dcm"),
                     ("NIfTI文件", "*.nii *.nii.gz"),
+                    ("DICOM文件", "*.dcm"),
                     ("NRRD文件", "*.nrrd"),
                     ("MHA/MHD文件", "*.mha *.mhd"),
                     ("所有支持格式", "*.dcm *.nii *.nii.gz *.nrrd *.mha *.mhd"),
@@ -2615,21 +2778,35 @@ class IntegratedFeatureExtractorGUI:
                     input_dir: str, mask_dir: str) -> List[Tuple[str, str, str, str]]:
 
         matched_pairs = []
-
+        
         mask_dict = {}
         for mask_path, mask_rel_path in mask_files:
-            mask_name = Path(mask_path).stem
-            if mask_name.endswith('.nii'): 
-                mask_name = Path(mask_name).stem
+            p = Path(mask_path)
+            base_name = p.name
+            while Path(base_name).suffix:
+                base_name = Path(base_name).stem
 
-            key = f"{mask_rel_path}/{mask_name}"
+            clean_base_name = base_name.replace('_mask', '').replace('_seg', '').replace('-mask', '').replace('-seg', '')
+            
+            key = f"{mask_rel_path}/{clean_base_name}"
             mask_dict[key] = mask_path
 
         for image_path, image_rel_path in image_files:
-            image_name = Path(image_path).stem
-            
+            p = Path(image_path)
+            base_name = p.name
+            while Path(base_name).suffix:
+                base_name = Path(base_name).stem
 
-            key = f"{image_rel_path}/{image_name}"
+            key = f"{image_rel_path}/{base_name}"
+            
             if key in mask_dict:
-                matched_pairs.append((image_name, image_path, mask_dict[key], image_rel_path))
-                continue
+                case_id = base_name
+                matched_pairs.append((case_id, image_path, mask_dict[key], image_rel_path))
+
+        return matched_pairs
+    
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = IntegratedFeatureExtractorGUI(root)
+    root.mainloop()
