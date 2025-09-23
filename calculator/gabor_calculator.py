@@ -35,7 +35,7 @@ class GaborCalculator(BaseCalculator):
 
         self.validate_input(image, mask)
         
-        roi = self._extract_roi(image, mask)
+        roi, roi_mask = self._extract_roi(image, mask)
         roi_normalized = self._normalize_image(roi)
         
         features = {}
@@ -49,7 +49,7 @@ class GaborCalculator(BaseCalculator):
                 
                 magnitude = np.sqrt(real**2 + imag**2)
                 
-                stats = self._extract_statistics(magnitude, mask)
+                stats = self._extract_statistics(magnitude, roi_mask)
                 
                 orientation_deg = np.degrees(orientation)
                 prefix = f'gabor_w{wavelength}_o{int(orientation_deg)}'
@@ -74,7 +74,7 @@ class GaborCalculator(BaseCalculator):
         
         self.validate_input(image, mask)
         
-        roi = self._extract_roi(image, mask)
+        roi, roi_mask = self._extract_roi(image, mask)
         roi_normalized = self._normalize_image(roi)
         
         features = {}
@@ -85,7 +85,7 @@ class GaborCalculator(BaseCalculator):
             real, imag = self._apply_gabor_filter(roi_normalized, wavelength, orientation)
             magnitude = np.sqrt(real**2 + imag**2)
             
-            stats = self._extract_statistics(magnitude, mask)
+            stats = self._extract_statistics(magnitude, roi_mask)
             
             orientation_deg = np.degrees(orientation)
             prefix = f'gabor_w{wavelength}_o{int(orientation_deg)}'
@@ -129,32 +129,37 @@ class GaborCalculator(BaseCalculator):
         
         return real, imag
     
-    def _extract_roi(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    def _extract_roi(self, image: np.ndarray, mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
 
-        coords = np.column_stack(np.where(mask > 0))
-        min_row, min_col = coords.min(axis=0)
-        max_row, max_col = coords.max(axis=0)
+            coords = np.column_stack(np.where(mask > 0))
+            min_row, min_col = coords.min(axis=0)
+            max_row, max_col = coords.max(axis=0)
 
-        roi = image[min_row:max_row+1, min_col:max_col+1].copy()
-        roi_mask = mask[min_row:max_row+1, min_col:max_col+1]
-        
-        roi[roi_mask == 0] = 0
-        
-        return roi
+            roi = image[min_row:max_row+1, min_col:max_col+1].copy()
+            roi_mask = mask[min_row:max_row+1, min_col:max_col+1]
+            
+            roi[roi_mask == 0] = 0
+            
+            return roi, roi_mask
     
     def _normalize_image(self, image: np.ndarray) -> np.ndarray:
-
+        
         non_zero = image[image > 0]
         if len(non_zero) == 0:
             return image
         
-        min_val = non_zero.min()
-        max_val = non_zero.max()
+        p1, p99 = np.percentile(non_zero, [1, 99])
         
-        if max_val == min_val:
-            return image
+        if p99 <= p1:
+            min_val = non_zero.min()
+            max_val = non_zero.max()
+            if max_val > min_val:
+                normalized = (image - min_val) / (max_val - min_val)
+            else:
+                normalized = np.zeros_like(image, dtype=np.float64)
+        else:
+            normalized = np.clip((image - p1) / (p99 - p1), 0, 1)
         
-        normalized = (image - min_val) / (max_val - min_val)
         normalized[image == 0] = 0
         
         return normalized
