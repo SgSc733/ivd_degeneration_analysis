@@ -13,7 +13,7 @@ class BaseCalculator(ABC):
         self.name = name
         self.logger = logging.getLogger(self.__class__.__name__)
         self.enable_parallel = enable_parallel
-        self.max_workers = mp.cpu_count() // 2  # 使用一半的CPU核心
+        self.max_workers = mp.cpu_count() // 2
     
     @abstractmethod
     def calculate(self, *args, **kwargs) -> Dict[str, Any]:
