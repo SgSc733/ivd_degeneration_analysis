@@ -17,6 +17,31 @@ class Config:
     
     CSF_LABEL = 1
 
+    DURAL_SAC_LABEL = 20  
+    
+    LANDMARK_LABELS = {    
+        'L1': 31,
+        'L2': 32,
+        'L3': 33,
+        'L4': 34,
+        'L5': 35,
+        'S1': 36
+    }
+
+    DSCR_PARAMS = {
+        'spline_smoothing': 0, 
+        'spline_degree': 2,     
+        'min_landmarks': 3    
+    }
+
+    NP_LABELS = {
+        'L1-L2': {'np': 13},
+        'L2-L3': {'np': 15},
+        'L3-L4': {'np': 17},
+        'L4-L5': {'np': 19},
+        'L5-S1': {'np': 21}
+    }
+
     DHI_PARAMS = {
         'central_ratio': 0.8,
         'calculate_dwr': True,
@@ -54,8 +79,6 @@ class Config:
     TEXTURE_PARAMS = {
         'lbp_radius': 1,
         'lbp_n_points': 8,
-        'glcm_distances': [1, 3, 5],
-        'glcm_angles': None  
     }
 
     NUM_SLICES = 3 
@@ -100,11 +123,12 @@ class Config:
 
     FEATURE_SETS = {
         'conventional': ['dhi', 'asi'],
-        'shape': ['dhi', 'hu_moments'],
+        'shape': ['dhi', 'hu_moments', 'dscr'], 
         'texture': ['gabor', 'texture_features'],
         'fractal': ['fd'],
         'signal': ['t2si'],
-        'all': ['dhi', 'asi', 'fd', 't2si', 'gabor', 'hu_moments', 'texture_features']
+        'stenosis': ['dscr'],  
+        'all': ['dhi', 'asi', 'fd', 't2si', 'gabor', 'hu_moments', 'texture_features', 'dscr']  
     }
 
     PARALLEL_CONFIG = {
