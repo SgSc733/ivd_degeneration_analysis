@@ -39,7 +39,7 @@ class ASICalculator(BaseCalculator):
             
             csf_intensity = self._calculate_csf_intensity(csf_image, csf_mask)
             
-            asi = (peak_diff / csf_intensity) * self.scale_factor
+            asi = (peak_diff / csf_intensity)
             
             means = gmm.means_.flatten()
             weights = gmm.weights_
@@ -91,26 +91,39 @@ class ASICalculator(BaseCalculator):
         return gmm, gmm_data
     
     def _calculate_peak_difference(self, gmm: GaussianMixture) -> float:
-
+        """修复的峰值差异计算，增强了对GMM拟合结果的鲁棒性"""
+        
         means = gmm.means_.flatten()
         
         if len(means) != 2:
-            raise ValueError(f"期望2个峰值，但得到{len(means)}个")
+            self.logger.warning(f"GMM拟合得到{len(means)}个峰值，期望2个。将采用备用策略。")
+            if len(means) > 2:
+                peak_diff = abs(np.max(means) - np.min(means))
+            elif len(means) == 1:
+                peak_diff = float(np.sqrt(gmm.covariances_[0][0, 0]))
+            else:
+                return 0.0
+        else:
+            peak_diff = abs(means[1] - means[0])
         
-        peak_diff = abs(means[1] - means[0])
-        
-        return peak_diff
+        return float(peak_diff)
     
     def _calculate_csf_intensity(self, image: np.ndarray, csf_mask: np.ndarray) -> float:
-
+        
         csf_intensities = self._extract_signal_intensities(image, csf_mask)
         
         if len(csf_intensities) == 0:
-            raise ValueError("CSF掩模中没有有效像素")
+            self.logger.warning("CSF掩模中没有有效像素，使用全图95%分位数作为备用参考")
+            valid_pixels = image[image > 0]
+            if len(valid_pixels) > 0:
+                csf_mean = np.percentile(valid_pixels, 95)
+            else:
+                self.logger.error("图像中没有有效像素，无法计算CSF参考值")
+                raise ValueError("图像中没有有效像素")
+        else:
+            csf_mean = np.median(csf_intensities)
         
-        csf_mean = np.median(csf_intensities)
-        
-        return csf_mean
+        return float(csf_mean)
     
     def _prepare_gmm_visualization_data(self, intensities: np.ndarray, 
                                       gmm: GaussianMixture) -> Dict:
