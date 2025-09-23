@@ -4,12 +4,13 @@ import numpy as np
 import cv2
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import tkinter as tk
-from PyQt5.QtCore import QThread, pyqtSignal
 import SimpleITK as sitk
 import pydicom
 from pathlib import Path
 import json
 from datetime import datetime
+import threading
+from queue import Queue
 
 PERTURB_TEXT_DICT = {
     'cn': {
@@ -38,54 +39,18 @@ PERTURB_TEXT_DICT = {
         'translation_range': '平移范围(像素):',
         'rotation_range': '旋转范围(度):',
         'noise_std': '噪声标准差:',
+        'morph_kernel_size': '形态学核大小:',
+        'morph_iterations': '迭代次数:',
         'execution_control': '执行控制',
         'select_all': '全选',
         'clear_all': '清除',
         'start_processing': '🚀 开始处理',
         'run_log': '📝 运行日志',
-        'welcome_msg': '🎯 椎间盘图像扰动系统已就绪！\n💡 提示：选择文件和扰动类型后点击开始处理'
-    },
-    'en': {
-        'file_selection': '📁 File Selection',
-        'process_mode': 'Process Mode:',
-        'batch_mode': '📊 Batch Process',
-        'single_mode': '🔍 Single Case',
-        'input_path': 'Input Path:',
-        'mask_path': 'Mask Path:',
-        'output_path': 'Output Path:',
-        'select': 'Select',
-        'perturbation_types': '🔧 Perturbation Types',
-        'original': 'Original',
-        'dilation': 'Dilation',
-        'erosion': 'Erosion',
-        'contour_random': 'Contour Randomization',
-        'translation': 'Translation',
-        'rotation': 'Rotation',
-        'gaussian_noise': 'Gaussian Noise',
-        'translation_rotation': 'Translation+Rotation',
-        'dilation_trans_rot': 'Dilation+Translation+Rotation',
-        'erosion_trans_rot': 'Erosion+Translation+Rotation',
-        'contour_trans_rot': 'Contour Random+Translation+Rotation',
-        'contour_trans_rot_noise': 'Contour Random+Translation+Rotation+Noise',
-        'param_settings': '🔧 Parameter Settings',
-        'translation_range': 'Translation Range (pixels):',
-        'rotation_range': 'Rotation Range (degrees):',
-        'noise_std': 'Noise Std Dev:',
-        'execution_control': 'Execution Control',
-        'select_all': 'Select All',
-        'clear_all': 'Clear All',
-        'start_processing': '🚀 Start Processing',
-        'run_log': '📝 Run Log',
-        'welcome_msg': '🎯 IVD Image Perturbation System Ready!\n💡 Tip: Select files and perturbation types then click start'
+        'welcome_msg': '🎯 椎间盘图像扰动系统已就绪！'
     }
 }
 
-class PerturbationWorker(QThread):
-    """后台处理线程"""
-    progress = pyqtSignal(int)
-    status = pyqtSignal(str)
-    finished = pyqtSignal()
-    error = pyqtSignal(str)
+class PerturbationWorker(threading.Thread):
     
     def __init__(self, image_path, mask_path, output_path, perturbations, params):
         super().__init__()
@@ -94,121 +59,263 @@ class PerturbationWorker(QThread):
         self.output_path = output_path
         self.perturbations = perturbations
         self.params = params
+
+    MIN_PIXEL_THRESHOLD = 20
+
+    PERTURBATION_MAPPING = {
+        "膨胀": "dilation",
+        "腐蚀": "erosion",
+        "轮廓随机化": "contour_random",
+        "平移": "translation",
+        "旋转": "rotation",
+        "高斯噪声": "gaussian_noise",
+        "平移+旋转": "translation_rotation",
+        "膨胀+平移+旋转": "dilation_trans_rot",
+        "腐蚀+平移+旋转": "erosion_trans_rot",
+        "轮廓随机化+平移+旋转": "contour_trans_rot",
+        "轮廓随机化+平移+旋转+噪声": "contour_trans_rot_noise"
+    }
         
+    def __init__(self, image_path, mask_path, output_path, perturbations, params, callback_queue):
+        super().__init__(daemon=True)
+        self.image_path = image_path
+        self.mask_path = mask_path
+        self.output_path = output_path
+        self.perturbations = perturbations
+        self.params = params
+        self.callback_queue = callback_queue
+        self._stop_event = threading.Event()
+        
+    def stop(self):
+        self._stop_event.set()
+        
+    def emit_progress(self, value):
+        self.callback_queue.put(('progress', value))
+        
+    def emit_status(self, text):
+        self.callback_queue.put(('status', text))
+        
+    def emit_error(self, text):
+        self.callback_queue.put(('error', text))
+        
+    def emit_finished(self):
+        self.callback_queue.put(('finished', None))
+    
     def run(self):
         try:
             self.process_files()
+            self.emit_finished()
         except Exception as e:
-            self.error.emit(str(e))
+            self.emit_error(str(e))
             
     def process_files(self):
+        self.image_output_dir = os.path.join(self.output_path, 'image')
+        self.mask_output_dir = os.path.join(self.output_path, 'mask')
+        os.makedirs(self.image_output_dir, exist_ok=True)
+        os.makedirs(self.mask_output_dir, exist_ok=True)
+        
         if os.path.isfile(self.image_path) and os.path.isfile(self.mask_path):
-            self.process_single_file(self.image_path, self.mask_path, self.output_path)
+            self.process_single_file(self.image_path, self.mask_path)
         elif os.path.isdir(self.image_path) and os.path.isdir(self.mask_path):
-            self.process_directory(self.image_path, self.mask_path, self.output_path)
+            self.process_directory(self.image_path, self.mask_path)
         else:
-            self.error.emit("输入路径必须都是文件或都是文件夹")
+            self.emit_error("输入路径必须都是文件或都是文件夹")
             
-    def process_directory(self, img_dir, mask_dir, out_dir):
-
+    def process_directory(self, img_dir, mask_dir):
         img_files = {}
         for root, dirs, files in os.walk(img_dir):
             for file in files:
                 if file.lower().endswith(('.dcm', '.nii', '.nii.gz')):
                     rel_path = os.path.relpath(root, img_dir)
-                    base_name = Path(file).stem
-                    if base_name.endswith('.nii'):
+                    base_name = Path(file).name
+                    while Path(base_name).suffix:
                         base_name = Path(base_name).stem
+                    
                     key = os.path.join(rel_path, base_name).replace('\\', '/')
                     img_files[key] = (os.path.join(root, file), rel_path)
         
-        mask_files = {}
+        mask_dict = {}
         for root, dirs, files in os.walk(mask_dir):
             for file in files:
                 if file.lower().endswith(('.dcm', '.nii', '.nii.gz')):
                     rel_path = os.path.relpath(root, mask_dir)
-                    base_name = Path(file).stem
-                    if base_name.endswith('.nii'):
+                    
+                    base_name = Path(file).name
+                    while Path(base_name).suffix:
                         base_name = Path(base_name).stem
-                    key = os.path.join(rel_path, base_name).replace('\\', '/')
-                    mask_files[key] = (os.path.join(root, file), rel_path)
+                    
+                    clean_base_name = base_name.replace('_mask', '').replace('_seg', '').replace('-mask', '').replace('-seg', '')
+                    
+                    key = os.path.join(rel_path, clean_base_name).replace('\\', '/')
+                    mask_dict[key] = os.path.join(root, file)
+
+        matched_pairs = []
+        for key, (img_path, img_rel_path) in img_files.items():
+            if key in mask_dict:
+                mask_path = mask_dict[key]
+                case_id = Path(img_path).name
+                while Path(case_id).suffix:
+                    case_id = Path(case_id).stem
+                matched_pairs.append((case_id, img_path, mask_path, img_rel_path))
         
-        matched_keys = sorted(set(img_files.keys()) & set(mask_files.keys()))
-        total_files = len(matched_keys)
+        matched_pairs = sorted(matched_pairs)
+        total_files = len(matched_pairs)
         
         if total_files == 0:
-            self.error.emit("没有找到匹配的图像和掩膜文件对")
+            self.emit_error("没有找到匹配的图像和掩膜文件对")
             return
         
-        self.status.emit(f"找到 {total_files} 对匹配的文件")
+        self.emit_status(f"找到 {total_files} 对匹配的文件")
         
-        for i, key in enumerate(matched_keys):
-            img_path, img_rel = img_files[key]
-            mask_path, mask_rel = mask_files[key]
-            
-            self.progress.emit(int((i / total_files) * 100))
-            self.status.emit(f"处理文件 {i+1}/{total_files}: {os.path.basename(img_path)}")
-            
-            out_subdir = os.path.join(out_dir, img_rel)
-            os.makedirs(out_subdir, exist_ok=True)
-            
-            self.process_single_file(img_path, mask_path, out_subdir)
-            
-    def process_single_file(self, img_path, mask_path, out_dir):
+        for i, (case_id, img_path, mask_path, rel_path) in enumerate(matched_pairs):
+            if self._stop_event.is_set():
+                self.emit_status("处理被用户中止。")
+                break
 
+            self.emit_progress(int((i / total_files) * 100))
+            self.emit_status(f"处理文件 {i+1}/{total_files}: {case_id}")
+            
+            self.process_single_file(img_path, mask_path)
+            
+    def process_single_file(self, img_path, mask_path):
         image = self.read_medical_image(img_path)
         mask = self.read_medical_image(mask_path)
         
         if image is None or mask is None:
-            self.error.emit(f"无法读取文件: {img_path} 或 {mask_path}")
+            self.emit_error(f"无法读取文件: {img_path} 或 {mask_path}")
             return
-            
+        
         base_name = Path(img_path).stem
         if base_name.endswith('.nii'):
-            base_name = base_name[:-4]
-            
-        for perturb_name in self.perturbations:
-            self.status.emit(f"应用扰动: {perturb_name}")
-            
-            if perturb_name == "原始":
-                perturbed_img, perturbed_mask = image.copy(), mask.copy()
-            elif perturb_name == "膨胀":
-                perturbed_img, perturbed_mask = self.apply_dilation(image, mask)
-            elif perturb_name == "腐蚀":
-                perturbed_img, perturbed_mask = self.apply_erosion(image, mask)
-            elif perturb_name == "轮廓随机化":
-                perturbed_img, perturbed_mask = self.apply_contour_randomization(image, mask)
-            elif perturb_name == "平移":
-                perturbed_img, perturbed_mask = self.apply_translation(image, mask)
-            elif perturb_name == "旋转":
-                perturbed_img, perturbed_mask = self.apply_rotation(image, mask)
-            elif perturb_name == "高斯噪声":
-                perturbed_img, perturbed_mask = self.apply_gaussian_noise(image, mask)
-            elif perturb_name == "平移+旋转":
-                perturbed_img, perturbed_mask = self.apply_translation_rotation(image, mask)
-            elif perturb_name == "膨胀+平移+旋转":
-                img_temp, mask_temp = self.apply_dilation(image, mask)
-                perturbed_img, perturbed_mask = self.apply_translation_rotation(img_temp, mask_temp)
-            elif perturb_name == "腐蚀+平移+旋转":
-                img_temp, mask_temp = self.apply_erosion(image, mask)
-                perturbed_img, perturbed_mask = self.apply_translation_rotation(img_temp, mask_temp)
-            elif perturb_name == "轮廓随机化+平移+旋转":
-                img_temp, mask_temp = self.apply_contour_randomization(image, mask)
-                perturbed_img, perturbed_mask = self.apply_translation_rotation(img_temp, mask_temp)
-            elif perturb_name == "轮廓随机化+平移+旋转+噪声":
-                img_temp, mask_temp = self.apply_contour_randomization(image, mask)
-                img_temp2, mask_temp2 = self.apply_translation_rotation(img_temp, mask_temp)
-                perturbed_img, perturbed_mask = self.apply_gaussian_noise(img_temp2, mask_temp2)
+            base_name = Path(base_name).stem
+        
+        is_3d = len(image.shape) == 3 and image.shape[0] > 1
+        
+        total_perturbations = len(self.perturbations)
+        
+        for p_idx, perturb_name in enumerate(self.perturbations):
+            if self._stop_event.is_set():
+                break
                 
-            safe_name = perturb_name.replace("+", "_")
-            img_out_path = os.path.join(out_dir, f"{base_name}_{safe_name}_image.nii.gz")
-            mask_out_path = os.path.join(out_dir, f"{base_name}_{safe_name}_mask.nii.gz")
+            self.emit_status(f"应用扰动 {p_idx+1}/{total_perturbations}: {perturb_name}")
+            
+            safe_name = self.PERTURBATION_MAPPING.get(perturb_name, perturb_name)
+            safe_name = safe_name.replace("+", "_").replace(" ", "_")
+            
+            random_params = self._generate_random_params(perturb_name)
+            
+            if is_3d:
+                perturbed_slices_img = []
+                perturbed_slices_mask = []
+                
+                for slice_idx in range(image.shape[0]):
+                    img_slice = image[slice_idx, :, :].astype(np.float32)
+                    mask_slice = mask[slice_idx, :, :].astype(np.float32)
+                    
+                    perturbed_img, perturbed_mask = self._apply_perturbation_with_params(
+                        img_slice, mask_slice, perturb_name, random_params
+                    )
+                    
+                    perturbed_slices_img.append(perturbed_img)
+                    perturbed_slices_mask.append(perturbed_mask)
+                    
+                    progress = int(((p_idx + (slice_idx + 1) / image.shape[0]) / total_perturbations) * 100)
+                    self.emit_progress(progress)
+                
+                perturbed_img = np.stack(perturbed_slices_img, axis=0)
+                perturbed_mask = np.stack(perturbed_slices_mask, axis=0)
+            else:
+                perturbed_img, perturbed_mask = self._apply_perturbation_with_params(
+                    image.astype(np.float32), mask.astype(np.float32), perturb_name, random_params
+                )
+                progress = int(((p_idx + 1) / total_perturbations) * 100)
+                self.emit_progress(progress)
+            
+            img_out_path = os.path.join(self.image_output_dir, f"{base_name}_{safe_name}.nii.gz")
+            mask_out_path = os.path.join(self.mask_output_dir, f"{base_name}_{safe_name}_mask.nii.gz")
             
             self.save_medical_image(perturbed_img, img_out_path)
             self.save_medical_image(perturbed_mask, mask_out_path)
             
-    def read_medical_image(self, path):
+            self.emit_status(f"已保存: {base_name}_{safe_name}")
 
+    def _apply_perturbation(self, img, mask, perturb_name):
+
+        img = np.squeeze(img) if img.ndim > 2 else img
+        mask = np.squeeze(mask) if mask.ndim > 2 else mask
+        
+        if perturb_name == "原始":
+            return img.copy(), mask.copy()
+        elif perturb_name == "膨胀":
+            return self.apply_dilation(img, mask)
+        elif perturb_name == "腐蚀":
+            return self.apply_erosion(img, mask)
+        elif perturb_name == "轮廓随机化":
+            return self.apply_contour_randomization(img, mask)
+        elif perturb_name == "平移":
+            return self.apply_translation(img, mask)
+        elif perturb_name == "旋转":
+            return self.apply_rotation(img, mask)
+        elif perturb_name == "高斯噪声":
+            return self.apply_gaussian_noise(img, mask)
+        elif perturb_name == "平移+旋转":
+            return self.apply_translation_rotation(img, mask)
+        elif perturb_name == "膨胀+平移+旋转":
+            img_temp, mask_temp = self.apply_dilation(img, mask)
+            return self.apply_translation_rotation(img_temp, mask_temp)
+        elif perturb_name == "腐蚀+平移+旋转":
+            img_temp, mask_temp = self.apply_erosion(img, mask)
+            return self.apply_translation_rotation(img_temp, mask_temp)
+        elif perturb_name == "轮廓随机化+平移+旋转":
+            img_temp, mask_temp = self.apply_contour_randomization(img, mask)
+            return self.apply_translation_rotation(img_temp, mask_temp)
+        elif perturb_name == "轮廓随机化+平移+旋转+噪声":
+            img_temp, mask_temp = self.apply_contour_randomization(img, mask)
+            img_temp2, mask_temp2 = self.apply_translation_rotation(img_temp, mask_temp)
+            return self.apply_gaussian_noise(img_temp2, mask_temp2)
+        else:
+            return img.copy(), mask.copy()
+            
+    def _apply_perturbation_to_slice(self, img_slice, mask_slice, perturb_name):
+
+        if len(img_slice.shape) > 2:
+            img_slice = img_slice.squeeze()
+        if len(mask_slice.shape) > 2:
+            mask_slice = mask_slice.squeeze()
+        
+        if perturb_name == "原始":
+            return img_slice.copy(), mask_slice.copy()
+        elif perturb_name == "膨胀":
+            return self.apply_dilation(img_slice, mask_slice)
+        elif perturb_name == "腐蚀":
+            return self.apply_erosion(img_slice, mask_slice)
+        elif perturb_name == "轮廓随机化":
+            return self.apply_contour_randomization(img_slice, mask_slice)
+        elif perturb_name == "平移":
+            return self.apply_translation(img_slice, mask_slice)
+        elif perturb_name == "旋转":
+            return self.apply_rotation(img_slice, mask_slice)
+        elif perturb_name == "高斯噪声":
+            return self.apply_gaussian_noise(img_slice, mask_slice)
+        elif perturb_name == "平移+旋转":
+            return self.apply_translation_rotation(img_slice, mask_slice)
+        elif perturb_name == "膨胀+平移+旋转":
+            img_temp, mask_temp = self.apply_dilation(img_slice, mask_slice)
+            return self.apply_translation_rotation(img_temp, mask_temp)
+        elif perturb_name == "腐蚀+平移+旋转":
+            img_temp, mask_temp = self.apply_erosion(img_slice, mask_slice)
+            return self.apply_translation_rotation(img_temp, mask_temp)
+        elif perturb_name == "轮廓随机化+平移+旋转":
+            img_temp, mask_temp = self.apply_contour_randomization(img_slice, mask_slice)
+            return self.apply_translation_rotation(img_temp, mask_temp)
+        elif perturb_name == "轮廓随机化+平移+旋转+噪声":
+            img_temp, mask_temp = self.apply_contour_randomization(img_slice, mask_slice)
+            img_temp2, mask_temp2 = self.apply_translation_rotation(img_temp, mask_temp)
+            return self.apply_gaussian_noise(img_temp2, mask_temp2)
+        else:
+            return img_slice.copy(), mask_slice.copy()
+
+    def read_medical_image(self, path):
         try:
             if path.lower().endswith('.dcm'):
                 ds = pydicom.dcmread(path)
@@ -217,91 +324,307 @@ class PerturbationWorker(QThread):
                 img = sitk.ReadImage(path)
                 return sitk.GetArrayFromImage(img).astype(np.float32)
         except Exception as e:
-            self.error.emit(f"读取文件错误 {path}: {str(e)}")
+            self.emit_error(f"读取文件错误 {path}: {str(e)}")
             return None
             
     def save_medical_image(self, array, path):
-
         img = sitk.GetImageFromArray(array)
         sitk.WriteImage(img, path)
         
     def apply_dilation(self, image, mask):
 
-        kernel = np.ones((2, 2), np.uint8)
-        dilated_mask = cv2.dilate(mask.astype(np.uint8), kernel, iterations=1)
-        return image.copy(), dilated_mask.astype(np.float32)
+        image = np.squeeze(image) if image.ndim > 2 else image
+        mask = np.squeeze(mask) if mask.ndim > 2 else mask
         
+        disc_labels = [3, 5, 7, 9, 11]
+        
+        kernel_size = self.params.get('morph_kernel_size', 2)
+        iterations = self.params.get('morph_iterations', 2)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+        
+        result_mask = mask.copy()
+        
+        for label in disc_labels:
+            binary_mask = (mask == label).astype(np.uint8)
+            if np.sum(binary_mask) == 0:
+                continue
+                
+            dilated = cv2.dilate(binary_mask, kernel, iterations=iterations)
+            
+            result_mask[dilated > 0] = label
+        
+        return image.copy(), result_mask
+
+
     def apply_erosion(self, image, mask):
 
-        kernel = np.ones((2, 2), np.uint8)
-        eroded_mask = cv2.erode(mask.astype(np.uint8), kernel, iterations=1)
-        return image.copy(), eroded_mask.astype(np.float32)
+        image = np.squeeze(image) if image.ndim > 2 else image
+        mask = np.squeeze(mask) if mask.ndim > 2 else mask
         
-    def apply_contour_randomization(self, image, mask):
-
-        kernel = np.ones((2, 2), np.uint8)
+        disc_labels = [3, 5, 7, 9, 11]
         
-        if np.random.random() > 0.5:
-            randomized_mask = cv2.dilate(mask.astype(np.uint8), kernel, iterations=1)
-        else:
-            randomized_mask = cv2.erode(mask.astype(np.uint8), kernel, iterations=1)
+        kernel_size = self.params.get('morph_kernel_size', 2)
+        iterations = self.params.get('morph_iterations', 2)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+        
+        result_mask = mask.copy()
+        
+        for label in disc_labels:
+            binary_mask = (mask == label).astype(np.uint8)
+            if np.sum(binary_mask) == 0:
+                continue
+                
+            eroded = cv2.erode(binary_mask, kernel, iterations=iterations)
             
-        return image.copy(), randomized_mask.astype(np.float32)
+            if np.sum(eroded) > self.MIN_PIXEL_THRESHOLD:
+                result_mask[mask == label] = 0
+                result_mask[eroded > 0] = label
         
+        return image.copy(), result_mask
+
+    def apply_contour_randomization(self, image, mask):
+        base_kernel_size = self.params.get('morph_kernel_size', 2)
+        base_iterations = self.params.get('morph_iterations', 2)
+        
+        random_params = {
+            'use_dilation': np.random.random() > 0.5,
+            'kernel_size': np.random.randint(
+                max(3, base_kernel_size - 2),
+                base_kernel_size + 3
+            ),
+            'iterations': np.random.randint(
+                max(1, base_iterations - 1),
+                base_iterations + 2
+            )
+        }
+        
+        return self.apply_contour_randomization_with_params(image, mask, random_params)
+
     def apply_translation(self, image, mask):
 
-        tx = np.random.randint(-self.params['translation_range'], self.params['translation_range'] + 1)
-        ty = np.random.randint(-self.params['translation_range'], self.params['translation_range'] + 1)
+        image = np.squeeze(image) if image.ndim > 2 else image
+        mask = np.squeeze(mask) if mask.ndim > 2 else mask
+        
+        range_val = self.params['translation_range']
+        tx = np.random.randint(-range_val, range_val + 1)
+        ty = np.random.randint(-range_val, range_val + 1)
         
         M = np.float32([[1, 0, tx], [0, 1, ty]])
-        
         h, w = image.shape[:2]
-        translated_img = cv2.warpAffine(image, M, (w, h))
-        translated_mask = cv2.warpAffine(mask, M, (w, h))
+        
+        translated_img = cv2.warpAffine(image.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        translated_mask = cv2.warpAffine(mask.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         
         return translated_img, translated_mask
-        
+
     def apply_rotation(self, image, mask):
 
-        angle = np.random.randint(0, self.params['rotation_range'])
+        image = np.squeeze(image) if image.ndim > 2 else image
+        mask = np.squeeze(mask) if mask.ndim > 2 else mask
+        
+        max_angle = self.params['rotation_range']
+        angle = np.random.uniform(-max_angle, max_angle)
         
         h, w = image.shape[:2]
         center = (w // 2, h // 2)
         
         M = cv2.getRotationMatrix2D(center, angle, 1.0)
         
-        rotated_img = cv2.warpAffine(image, M, (w, h))
-        rotated_mask = cv2.warpAffine(mask, M, (w, h))
+        rotated_img = cv2.warpAffine(image.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        rotated_mask = cv2.warpAffine(mask.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         
         return rotated_img, rotated_mask
-        
+
     def apply_gaussian_noise(self, image, mask):
 
-        noise = np.random.normal(0, self.params['noise_std'], image.shape)
+        image = np.squeeze(image) if image.ndim > 2 else image
+        mask = np.squeeze(mask) if mask.ndim > 2 else mask
+        
+        noise_std = self.params['noise_std']
+        noise = np.random.normal(0, noise_std, image.shape)
         noisy_image = image + noise
         
-        noisy_image = np.clip(noisy_image, 0, 255)
-        
-        return noisy_image, mask.copy()
-    
+        return noisy_image.astype(np.float32), mask.copy()
+
     def apply_translation_rotation(self, image, mask):
 
+        image = np.squeeze(image) if image.ndim > 2 else image
+        mask = np.squeeze(mask) if mask.ndim > 2 else mask
+        
         h, w = image.shape[:2]
         center = (w // 2, h // 2)
         
-        angle = np.random.uniform(0, self.params['rotation_range'])
+        range_val = self.params['translation_range']
+        max_angle = self.params['rotation_range']
+        
+        angle = np.random.uniform(-max_angle, max_angle)
+        tx = np.random.randint(-range_val, range_val + 1)
+        ty = np.random.randint(-range_val, range_val + 1)
+        
         M_rot = cv2.getRotationMatrix2D(center, angle, 1.0)
-        
-        tx = np.random.randint(-self.params['translation_range'], self.params['translation_range'] + 1)
-        ty = np.random.randint(-self.params['translation_range'], self.params['translation_range'] + 1)
-        
         M_rot[0, 2] += tx
         M_rot[1, 2] += ty
         
-        transformed_img = cv2.warpAffine(image, M_rot, (w, h))
-        transformed_mask = cv2.warpAffine(mask, M_rot, (w, h))
+        transformed_img = cv2.warpAffine(image.astype(np.float32), M_rot, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        transformed_mask = cv2.warpAffine(mask.astype(np.float32), M_rot, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         
         return transformed_img, transformed_mask
+    
+    def _generate_random_params(self, perturb_name):
+
+        params = {}
+        
+        if "平移" in perturb_name:
+            range_val = self.params['translation_range']
+            params['tx'] = np.random.randint(-range_val, range_val + 1)
+            params['ty'] = np.random.randint(-range_val, range_val + 1)
+        
+        if "旋转" in perturb_name:
+            max_angle = self.params['rotation_range']
+            params['angle'] = np.random.uniform(-max_angle, max_angle)
+        
+        if "轮廓随机化" in perturb_name:
+            base_kernel_size = self.params['morph_kernel_size']
+            base_iterations = self.params['morph_iterations']
+            params['use_dilation'] = np.random.random() > 0.5
+            params['kernel_size'] = np.random.randint(
+                max(3, base_kernel_size - 2),
+                base_kernel_size + 3
+            )
+            params['iterations'] = np.random.randint(
+                max(1, base_iterations - 1),
+                base_iterations + 2
+            )
+        
+        return params
+
+    def _apply_perturbation_with_params(self, img, mask, perturb_name, random_params):
+
+        img = np.squeeze(img) if img.ndim > 2 else img
+        mask = np.squeeze(mask) if mask.ndim > 2 else mask
+        
+        if perturb_name == "原始":
+            return img.copy(), mask.copy()
+        elif perturb_name == "膨胀":
+            return self.apply_dilation(img, mask)
+        elif perturb_name == "腐蚀":
+            return self.apply_erosion(img, mask)
+        elif perturb_name == "轮廓随机化":
+            return self.apply_contour_randomization_with_params(img, mask, random_params)
+        elif perturb_name == "平移":
+            return self.apply_translation_with_params(img, mask, random_params)
+        elif perturb_name == "旋转":
+            return self.apply_rotation_with_params(img, mask, random_params)
+        elif perturb_name == "高斯噪声":
+            return self.apply_gaussian_noise(img, mask)
+        elif perturb_name == "平移+旋转":
+            return self.apply_translation_rotation_with_params(img, mask, random_params)
+        elif perturb_name == "膨胀+平移+旋转":
+            img_temp, mask_temp = self.apply_dilation(img, mask)
+            return self.apply_translation_rotation_with_params(img_temp, mask_temp, random_params)
+        elif perturb_name == "腐蚀+平移+旋转":
+            img_temp, mask_temp = self.apply_erosion(img, mask)
+            return self.apply_translation_rotation_with_params(img_temp, mask_temp, random_params)
+        elif perturb_name == "轮廓随机化+平移+旋转":
+            img_temp, mask_temp = self.apply_contour_randomization_with_params(img, mask, random_params)
+            return self.apply_translation_rotation_with_params(img_temp, mask_temp, random_params)
+        elif perturb_name == "轮廓随机化+平移+旋转+噪声":
+            img_temp, mask_temp = self.apply_contour_randomization_with_params(img, mask, random_params)
+            img_temp2, mask_temp2 = self.apply_translation_rotation_with_params(img_temp, mask_temp, random_params)
+            return self.apply_gaussian_noise(img_temp2, mask_temp2)
+        else:
+            return img.copy(), mask.copy()
+
+    def apply_translation_with_params(self, image, mask, params):
+
+        image = np.squeeze(image) if image.ndim > 2 else image
+        mask = np.squeeze(mask) if mask.ndim > 2 else mask
+        
+        tx = params.get('tx', 0)
+        ty = params.get('ty', 0)
+        
+        M = np.float32([[1, 0, tx], [0, 1, ty]])
+        h, w = image.shape[:2]
+        
+        translated_img = cv2.warpAffine(image.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        translated_mask = cv2.warpAffine(mask.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        
+        return translated_img, translated_mask
+
+    def apply_rotation_with_params(self, image, mask, params):
+
+        image = np.squeeze(image) if image.ndim > 2 else image
+        mask = np.squeeze(mask) if mask.ndim > 2 else mask
+        
+        angle = params.get('angle', 0)
+        
+        h, w = image.shape[:2]
+        center = (w // 2, h // 2)
+        
+        M = cv2.getRotationMatrix2D(center, angle, 1.0)
+        
+        rotated_img = cv2.warpAffine(image.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        rotated_mask = cv2.warpAffine(mask.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        
+        return rotated_img, rotated_mask
+
+    def apply_translation_rotation_with_params(self, image, mask, params):
+
+        image = np.squeeze(image) if image.ndim > 2 else image
+        mask = np.squeeze(mask) if mask.ndim > 2 else mask
+        
+        h, w = image.shape[:2]
+        center = (w // 2, h // 2)
+        
+        angle = params.get('angle', 0)
+        tx = params.get('tx', 0)
+        ty = params.get('ty', 0)
+        
+        M_rot = cv2.getRotationMatrix2D(center, angle, 1.0)
+        M_rot[0, 2] += tx
+        M_rot[1, 2] += ty
+        
+        transformed_img = cv2.warpAffine(image.astype(np.float32), M_rot, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        transformed_mask = cv2.warpAffine(mask.astype(np.float32), M_rot, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        
+        return transformed_img, transformed_mask
+
+    def apply_contour_randomization_with_params(self, image, mask, params):
+
+        image = np.squeeze(image) if image.ndim > 2 else image
+        mask = np.squeeze(mask) if mask.ndim > 2 else mask
+        
+        disc_labels = [3, 5, 7, 9, 11]
+        
+        base_kernel_size = self.params.get('morph_kernel_size', 3)
+        base_iterations = self.params.get('morph_iterations', 2)
+        
+        result_mask = mask.copy()
+        use_dilation = params.get('use_dilation', True)
+        
+        random_kernel_size = params.get('kernel_size', base_kernel_size)
+        random_iterations = params.get('iterations', base_iterations)
+        
+        for label in disc_labels:
+            binary_mask = (mask == label).astype(np.uint8)
+            if np.sum(binary_mask) == 0:
+                continue
+            
+            kernel = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE,
+                (random_kernel_size, random_kernel_size)
+            )
+            
+            if use_dilation:
+                processed = cv2.dilate(binary_mask, kernel, iterations=random_iterations)
+            else:
+                processed = cv2.erode(binary_mask, kernel, iterations=random_iterations)
+            
+            result_mask[mask == label] = 0
+            result_mask[processed > 0] = label
+        
+        return image.copy(), result_mask
+
 
 class PerturbationGUI:
     def __init__(self, parent):
@@ -316,12 +639,10 @@ class PerturbationGUI:
         self.setup_gui()
 
     def get_text(self, key):
-
         lang = self.current_lang.get()
         return PERTURB_TEXT_DICT[lang].get(key, key)
 
     def update_language(self):
-
         if 'file_frame' in self.widgets:
             self.widgets['file_frame'].config(text=self.get_text('file_selection'))
         if 'perturb_frame' in self.widgets:
@@ -347,6 +668,10 @@ class PerturbationGUI:
             self.widgets['rot_label'].config(text=self.get_text('rotation_range'))
         if 'noise_label' in self.widgets:
             self.widgets['noise_label'].config(text=self.get_text('noise_std'))
+        if 'morph_label' in self.widgets:
+            self.widgets['morph_label'].config(text=self.get_text('morph_kernel_size'))
+        if 'morph_iter_label' in self.widgets:
+            self.widgets['morph_iter_label'].config(text=self.get_text('morph_iterations'))
         
         if 'input_btn' in self.widgets:
             self.widgets['input_btn'].config(text="📂 " + self.get_text('select'))
@@ -391,7 +716,6 @@ class PerturbationGUI:
             self.log_message(self.get_text('welcome_msg'))
     
     def create_checkbox_icon(self):
-
         import tkinter as tk
         from PIL import Image, ImageDraw
         
@@ -405,7 +729,27 @@ class PerturbationGUI:
         img.save(self.checkbox_icon_path)
         
     def setup_gui(self):
-        main_frame = ttk.Frame(self.parent, padding="15")
+        self.canvas = tk.Canvas(self.parent, bg='#f0f0f0', highlightthickness=0)
+        self.canvas.pack(side="left", fill="both", expand=True)
+
+        scrollbar = ttk.Scrollbar(self.parent, orient="vertical", command=self.canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+        
+        scrollable_frame = ttk.Frame(self.canvas)
+        canvas_window = self.canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+
+        def configure_scroll_region(event=None):
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+            canvas_width = self.canvas.winfo_width()
+            if canvas_width > 0:
+                self.canvas.itemconfig(canvas_window, width=canvas_width)
+        
+        scrollable_frame.bind("<Configure>", configure_scroll_region)
+        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfig(canvas_window, width=e.width))
+
+        main_frame = ttk.Frame(scrollable_frame, padding="15")
         main_frame.pack(fill="both", expand=True)
         
         file_frame = ttk.LabelFrame(main_frame, text=self.get_text('file_selection'), padding="10")
@@ -475,35 +819,29 @@ class PerturbationGUI:
         perturb_frame.pack(fill="x", pady=5)
         self.widgets['perturb_frame'] = perturb_frame
         
-        self.perturb_checks = {}
+        self.perturb_check_vars = {} 
         perturbations = [
-            "原始", "膨胀", "腐蚀", "轮廓随机化", 
+            "膨胀", "腐蚀", "轮廓随机化", 
             "平移", "旋转", "高斯噪声", "平移+旋转",
             "膨胀+平移+旋转", "腐蚀+平移+旋转", 
             "轮廓随机化+平移+旋转", "轮廓随机化+平移+旋转+噪声"
         ]
         
         perturbation_keys = {
-            "原始": 'original',
-            "膨胀": 'dilation',
-            "腐蚀": 'erosion',
-            "轮廓随机化": 'contour_random',
-            "平移": 'translation',
-            "旋转": 'rotation',
-            "高斯噪声": 'gaussian_noise',
-            "平移+旋转": 'translation_rotation',
-            "膨胀+平移+旋转": 'dilation_trans_rot',
-            "腐蚀+平移+旋转": 'erosion_trans_rot',
-            "轮廓随机化+平移+旋转": 'contour_trans_rot',
+            "膨胀": 'dilation', "腐蚀": 'erosion', "轮廓随机化": 'contour_random',
+            "平移": 'translation', "旋转": 'rotation', "高斯噪声": 'gaussian_noise',
+            "平移+旋转": 'translation_rotation', "膨胀+平移+旋转": 'dilation_trans_rot',
+            "腐蚀+平移+旋转": 'erosion_trans_rot', "轮廓随机化+平移+旋转": 'contour_trans_rot',
             "轮廓随机化+平移+旋转+噪声": 'contour_trans_rot_noise'
         }
         
         for i, name in enumerate(perturbations):
             key = perturbation_keys.get(name, name)
-            check = ttk.Checkbutton(perturb_frame, text=self.get_text(key))
-            self.perturb_checks[name] = check
+            var = tk.BooleanVar(value=True) 
+            self.perturb_check_vars[name] = var
+            check = ttk.Checkbutton(perturb_frame, text=self.get_text(key), variable=var)
             check.grid(row=i // 3, column=i % 3, sticky="w", padx=5, pady=2)
-        
+
         param_frame = ttk.LabelFrame(main_frame, text=self.get_text('param_settings'), padding="10")
         param_frame.pack(fill="x", pady=5)
         self.widgets['param_frame'] = param_frame
@@ -524,8 +862,8 @@ class PerturbationGUI:
         rot_label.grid(row=0, column=2, sticky="w", padx=(20,0), pady=2)
         self.widgets['rot_label'] = rot_label
         
-        self.rotation_var = tk.IntVar(value=360)
-        self.rotation_spin = ttk.Spinbox(param_grid, from_=1, to=360,
+        self.rotation_var = tk.IntVar(value=30)
+        self.rotation_spin = ttk.Spinbox(param_grid, from_=1, to=30,
                                     textvariable=self.rotation_var, width=10)
         self.rotation_spin.grid(row=0, column=3, sticky="w", padx=5, pady=2)
         
@@ -537,6 +875,26 @@ class PerturbationGUI:
         self.noise_spin = ttk.Spinbox(param_grid, from_=0.1, to=20.0, increment=0.5,
                                     textvariable=self.noise_var, width=10)
         self.noise_spin.grid(row=1, column=1, sticky="w", padx=5, pady=2)
+
+        row = 1
+        row += 1
+        morph_label = ttk.Label(param_grid, text=self.get_text('morph_kernel_size'))
+        morph_label.grid(row=row, column=0, sticky="w", pady=2)
+        self.widgets['morph_label'] = morph_label
+
+        self.morph_kernel_size = tk.IntVar(value=2)
+        morph_spin = ttk.Spinbox(param_grid, from_=2, to=5, 
+                                textvariable=self.morph_kernel_size, width=10)
+        morph_spin.grid(row=row, column=1, sticky="w", padx=5, pady=2)
+
+        morph_iter_label = ttk.Label(param_grid, text=self.get_text('morph_iterations'))
+        morph_iter_label.grid(row=row, column=2, sticky="w", padx=(20,0), pady=2)
+        self.widgets['morph_iter_label'] = morph_iter_label
+
+        self.morph_iterations = tk.IntVar(value=2)
+        morph_iter_spin = ttk.Spinbox(param_grid, from_=1, to=10,
+                                    textvariable=self.morph_iterations, width=10)
+        morph_iter_spin.grid(row=row, column=3, sticky="w", padx=5, pady=2)
         
         control_frame = ttk.LabelFrame(main_frame, text=self.get_text('execution_control'), padding="10")
         control_frame.pack(fill="x", pady=5)
@@ -544,20 +902,26 @@ class PerturbationGUI:
         
         button_frame = ttk.Frame(control_frame)
         button_frame.pack(fill="x")
-        
-        self.select_all_btn = ttk.Button(button_frame, text=self.get_text('select_all'),
+
+        left_button_frame = ttk.Frame(button_frame)
+        left_button_frame.pack(side="left")
+
+        self.select_all_btn = ttk.Button(left_button_frame, text=self.get_text('select_all'),
                                     command=self.select_all_perturbations)
         self.select_all_btn.pack(side="left", padx=2)
         self.widgets['select_all_btn'] = self.select_all_btn
         
-        self.clear_all_btn = ttk.Button(button_frame, text=self.get_text('clear_all'),
+        self.clear_all_btn = ttk.Button(left_button_frame, text=self.get_text('clear_all'),
                                     command=self.clear_all_perturbations)
         self.clear_all_btn.pack(side="left", padx=2)
         self.widgets['clear_all_btn'] = self.clear_all_btn
+
+        center_button_frame = ttk.Frame(button_frame)
+        center_button_frame.pack(fill="x", expand=True)
         
-        self.start_btn = ttk.Button(button_frame, text=self.get_text('start_processing'),
+        self.start_btn = ttk.Button(center_button_frame, text=self.get_text('start_processing'),
                                 command=self.start_processing)
-        self.start_btn.pack(side="right", padx=2)
+        self.start_btn.pack(anchor="center")
         self.widgets['start_btn'] = self.start_btn
         
         self.progress_var = tk.IntVar()
@@ -580,14 +944,12 @@ class PerturbationGUI:
         self.log_message(self.get_text('welcome_msg'))
     
     def log_message(self, message):
-
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
         self.log_text.see(tk.END)
         self.parent.update()
     
     def select_input(self):
-
         if self.input_type.get() == "single":
             path = filedialog.askopenfilename(
                 title="选择图像文件",
@@ -602,7 +964,6 @@ class PerturbationGUI:
             self.input_entry.insert(0, path)
     
     def select_mask(self):
-
         if self.input_type.get() == "single":
             path = filedialog.askopenfilename(
                 title="选择掩膜文件",
@@ -617,7 +978,6 @@ class PerturbationGUI:
             self.mask_entry.insert(0, path)
     
     def select_output(self):
-
         path = filedialog.askdirectory(title="选择输出文件夹")
         if path:
             self.output_path = path
@@ -625,23 +985,20 @@ class PerturbationGUI:
             self.output_entry.insert(0, path)
     
     def select_all_perturbations(self):
-
-        for check in self.perturb_checks.values():
-            check.state(['selected'])
+        for var in self.perturb_check_vars.values():
+            var.set(True)
     
     def clear_all_perturbations(self):
-
-        for check in self.perturb_checks.values():
-            check.state(['!selected'])
+        for var in self.perturb_check_vars.values():
+            var.set(False)
     
     def start_processing(self):
-
         if not self.image_path or not self.mask_path or not self.output_path:
             messagebox.showwarning("警告", "请选择所有必需的文件路径")
             return
         
-        selected_perturbations = [name for name, check in self.perturb_checks.items() 
-                                if check.instate(['selected'])]
+        selected_perturbations = [name for name, var in self.perturb_check_vars.items() 
+                                if var.get()]
         if not selected_perturbations:
             messagebox.showwarning("警告", "请至少选择一种扰动类型")
             return
@@ -649,7 +1006,9 @@ class PerturbationGUI:
         params = {
             'translation_range': self.translation_var.get(),
             'rotation_range': self.rotation_var.get(),
-            'noise_std': self.noise_var.get()
+            'noise_std': self.noise_var.get(),
+            'morph_kernel_size': self.morph_kernel_size.get(),
+            'morph_iterations': self.morph_iterations.get()
         }
         
         self.start_btn.config(state='disabled')
@@ -659,27 +1018,44 @@ class PerturbationGUI:
         self.log_text.delete(1.0, tk.END)
         self.log_message("🚀 开始处理...")
         
+        self.callback_queue = Queue()
+        
         self.worker = PerturbationWorker(
             self.image_path, self.mask_path, self.output_path,
-            selected_perturbations, params
+            selected_perturbations, params, self.callback_queue
         )
-        self.worker.progress.connect(self.update_progress)
-        self.worker.status.connect(self.update_status)
-        self.worker.finished.connect(self.processing_finished)
-        self.worker.error.connect(self.show_error)
         self.worker.start()
+        
+        self.check_callbacks()
+
+    def check_callbacks(self):
+
+        try:
+            while not self.callback_queue.empty():
+                msg_type, msg_data = self.callback_queue.get_nowait()
+                if msg_type == 'progress':
+                    self.update_progress(msg_data)
+                elif msg_type == 'status':
+                    self.update_status(msg_data)
+                elif msg_type == 'error':
+                    self.show_error(msg_data)
+                elif msg_type == 'finished':
+                    self.processing_finished()
+                    return
+        except:
+            pass
+        
+        if hasattr(self, 'worker') and self.worker.is_alive():
+            self.parent.after(100, self.check_callbacks)
     
     def update_progress(self, value):
-
         self.progress_var.set(value)
     
     def update_status(self, text):
-
         self.status_label.config(text=text)
         self.log_message(text)
     
     def processing_finished(self):
-
         self.start_btn.config(state='normal')
         self.progress_bar.pack_forget()
         self.status_label.pack_forget()
@@ -687,7 +1063,6 @@ class PerturbationGUI:
         messagebox.showinfo("完成", "图像扰动处理完成！")
     
     def show_error(self, error_msg):
-
         self.start_btn.config(state='normal')
         self.progress_bar.pack_forget()
         self.status_label.pack_forget()
@@ -695,7 +1070,6 @@ class PerturbationGUI:
         messagebox.showerror("错误", f"处理过程中出现错误：\n{error_msg}")
 
     def __del__(self):
-
         try:
             if hasattr(self, 'checkbox_icon_path') and os.path.exists(self.checkbox_icon_path):
                 os.remove(self.checkbox_icon_path)
