@@ -18,6 +18,8 @@ from pathlib import Path
 import json
 import warnings
 import ctypes
+import threading
+from queue import Queue
 
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(1)
@@ -73,11 +75,12 @@ TEXT_DICT = {
         'adjust_value_hint': '\n您可以根据需要调整此值。',
         'calculate_icc_first': '请先计算ICC矩阵',
         'cannot_calculate_suggestion': '无法计算建议值: ',
+        'icc_filter_group': '稳健性预筛选',
+        'enable_icc_filter': '启用预筛选',
+        'min_icc_threshold': '最小ICC>=',
+        'mean_icc_threshold': '平均ICC>=',
         'welcome_msg': """
 🎯 椎间盘特征稳健性分析系统已就绪！
-
-📋 支持ICC计算、聚类分析和相关性筛选
-💡 提示：请先选择包含所有条件特征的CSV文件！
     """,
         'file_not_selected': '请先选择输入文件',
         'output_not_selected': '请选择输出路径',
@@ -97,74 +100,6 @@ TEXT_DICT = {
         'remove_irrelevant': '移除无关特征(p>0.05)',
         'cluster_cut_height': '聚类切割高度:',
         'auto_cut_height': '自动确定切割高度'
-    },
-    'en': {
-        'title': 'IVD Feature Robustness Analysis System',
-        'file_selection': '📁 File Selection',
-        'input_file': 'Input File:',
-        'select': 'Select',
-        'output_path': 'Output Path:',
-        'select_input_file': 'Select Feature CSV File',
-        'select_output_path': 'Select Output Folder',
-        'analysis_settings': '🔧 Analysis Settings',
-        'icc_settings': 'ICC Calculation Settings',
-        'icc_type': 'ICC Type:',
-        'icc_confidence': 'ICC Confidence Level:',
-        'clustering_settings': 'Clustering Settings',
-        'clustering_method': 'Clustering Method:',
-        'linkage_method': 'Linkage Method:',
-        'distance_metric': 'Distance Metric:',
-        'cluster_selection': 'Cluster Selection:',
-        'n_clusters': 'Number of Clusters:',
-        'correlation_settings': 'Correlation Analysis Settings',
-        'correlation_threshold': 'Correlation Threshold:',
-        'variance_criterion': 'Variance Criterion:',
-        'remove_lower': 'Remove Lower Variance Features',
-        'remove_higher': 'Remove Higher Variance Features',
-        'execution_control': 'Execution Control',
-        'start_analysis': '🚀 Start Analysis',
-        'stop': '⏹ Stop',
-        'run_log': '📝 Run Log',
-        'visualization': '📊 Visualization',
-        'show_icc_heatmap': 'Show ICC Heatmap',
-        'show_dendrogram': 'Show Dendrogram',
-        'show_correlation': 'Show Correlation Matrix',
-        'error': 'Error',
-        'warning': 'Warning',
-        'info': 'Info',
-        'success': 'Success',
-        'remove_lower': 'Remove Lower Variance Features',
-        'remove_higher': 'Remove Higher Variance Features',
-        'manual_only': '(For manual selection only)',
-        'suggest_clusters': 'Auto Suggest k',
-        'suggested_clusters': 'Suggested optimal clusters: ',
-        'adjust_value_hint': '\nYou can adjust this value as needed.',
-        'calculate_icc_first': 'Please calculate ICC matrix first',
-        'cannot_calculate_suggestion': 'Cannot calculate suggestion: ',
-        'welcome_msg': """
-🎯 IVD Feature Robustness Analysis System is ready!
-
-📋 Supports ICC calculation, clustering analysis and correlation filtering
-💡 Tip: Please select CSV file containing all condition features first!
-    """,
-        'file_not_selected': 'Please select input file',
-        'output_not_selected': 'Please select output path',
-        'loading_data': 'Loading data...',
-        'data_loaded': 'Data loaded',
-        'calculating_icc': 'Calculating ICC matrix...',
-        'icc_complete': 'ICC calculation complete',
-        'performing_clustering': 'Performing clustering analysis...',
-        'clustering_complete': 'Clustering analysis complete',
-        'analyzing_correlation': 'Analyzing feature correlation...',
-        'correlation_complete': 'Correlation analysis complete',
-        'saving_results': 'Saving results...',
-        'analysis_complete': 'Analysis complete!',
-        'results_saved': 'Results saved to:',
-        'feature_relevance_filter': 'Feature Relevance Filter',
-        'min_correlation_with_grade': 'Min Correlation with Grade:',
-        'remove_irrelevant': 'Remove Irrelevant Features (p>0.05)',
-        'cluster_cut_height': 'Cluster Cut Height:',
-        'auto_cut_height': 'Auto Determine Cut Height'
     }
 }
 
@@ -193,6 +128,10 @@ class RobustnessGUI:
         self.min_correlation = tk.DoubleVar(value=0.0)
         self.auto_cut_height = tk.BooleanVar(value=True)
         self.cut_height = tk.DoubleVar(value=0.0)
+
+        self.enable_icc_filter = tk.BooleanVar(value=True)
+        self.min_icc_threshold = tk.DoubleVar(value=0.25)
+        self.mean_icc_threshold = tk.DoubleVar(value=0.5)
         
         self.feature_data = None
         self.icc_matrix = None
@@ -200,23 +139,22 @@ class RobustnessGUI:
         self.final_features = None
         
         self.widgets = {}
+
+        self.queue = Queue() 
         
         self.setup_gui()
         
         self.setup_logging()
         
     def setup_logging(self):
-
         self.logger = logging.getLogger('FeatureRobustness')
         self.logger.setLevel(logging.INFO)
         
     def get_text(self, key):
-
         lang = self.current_lang.get()
         return TEXT_DICT[lang].get(key, key)
     
     def update_language(self):
-
         for widget_name, widget in self.widgets.items():
             if widget_name.endswith('_frame'):
                 widget.config(text=self.get_text(widget_name.replace('_frame', '')))
@@ -249,20 +187,35 @@ class RobustnessGUI:
             self.widgets['suggest_clusters_btn'].config(text=self.get_text('suggest_clusters'))
     
     def setup_gui(self):
+        self.canvas = tk.Canvas(self.parent, bg='#f0f0f0', highlightthickness=0)
+        self.canvas.pack(side="left", fill="both", expand=True)
 
-        main_frame = ttk.Frame(self.parent, padding="15")
+        scrollbar = ttk.Scrollbar(self.parent, orient="vertical", command=self.canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+        
+        scrollable_frame = ttk.Frame(self.canvas)
+        canvas_window = self.canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+
+        def configure_scroll_region(event=None):
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+            canvas_width = self.canvas.winfo_width()
+            if canvas_width > 0:
+                self.canvas.itemconfig(canvas_window, width=canvas_width)
+        
+        scrollable_frame.bind("<Configure>", configure_scroll_region)
+        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfig(canvas_window, width=e.width))
+
+        main_frame = ttk.Frame(scrollable_frame, padding="15")
         main_frame.pack(fill="both", expand=True)
         
         self._setup_file_selection(main_frame)
-
         self._setup_analysis_settings(main_frame)
-
         self._setup_controls(main_frame)
-
         self._setup_log_display(main_frame)
         
     def _setup_file_selection(self, parent):
-
         file_frame = ttk.LabelFrame(parent, text=self.get_text('file_selection'), padding="10")
         file_frame.pack(fill="x", pady=5)
         self.widgets['file_selection_frame'] = file_frame
@@ -298,7 +251,6 @@ class RobustnessGUI:
         self.widgets['select_output_btn'] = output_btn
         
     def _setup_analysis_settings(self, parent):
-
         settings_frame = ttk.LabelFrame(parent, text=self.get_text('analysis_settings'), padding="10")
         settings_frame.pack(fill="x", pady=5)
         self.widgets['analysis_settings_frame'] = settings_frame
@@ -312,7 +264,7 @@ class RobustnessGUI:
         right_frame = ttk.Frame(settings_frame)
         right_frame.pack(side="left", fill="both", expand=True, padx=(10, 0))
 
-        icc_group = ttk.LabelFrame(left_frame, text=self.get_text('icc_settings'), padding="10")
+        icc_group = ttk.LabelFrame(middle_frame, text=self.get_text('icc_settings'), padding="10")
         icc_group.pack(fill="x", pady=5)
         self.widgets['icc_settings_frame'] = icc_group
 
@@ -426,6 +378,32 @@ class RobustnessGUI:
                 self.cluster_selection.set("min_icc")
             elif "手动" in current:
                 self.cluster_selection.set("manual")
+
+        icc_filter_group = ttk.LabelFrame(left_frame, text=self.get_text('icc_filter_group'), padding="10")
+        icc_filter_group.pack(fill="x", pady=5, side="top")
+        self.widgets['icc_filter_group_frame'] = icc_filter_group
+
+        filter_enable_cb = ttk.Checkbutton(icc_filter_group, text=self.get_text('enable_icc_filter'), variable=self.enable_icc_filter)
+        filter_enable_cb.pack(anchor="w")
+        self.widgets['enable_icc_filter_cb'] = filter_enable_cb
+        
+        min_icc_frame = ttk.Frame(icc_filter_group)
+        min_icc_frame.pack(fill="x", pady=2)
+        min_icc_label = ttk.Label(min_icc_frame, text=self.get_text('min_icc_threshold'))
+        min_icc_label.pack(side="left")
+        self.widgets['min_icc_threshold_label'] = min_icc_label
+        min_icc_spinbox = ttk.Spinbox(min_icc_frame, from_=0.0, to=1.0, increment=0.05,
+                                      textvariable=self.min_icc_threshold, width=10)
+        min_icc_spinbox.pack(side="left", padx=5)
+
+        mean_icc_frame = ttk.Frame(icc_filter_group)
+        mean_icc_frame.pack(fill="x", pady=2)
+        mean_icc_label = ttk.Label(mean_icc_frame, text=self.get_text('mean_icc_threshold'))
+        mean_icc_label.pack(side="left")
+        self.widgets['mean_icc_threshold_label'] = mean_icc_label
+        mean_icc_spinbox = ttk.Spinbox(mean_icc_frame, from_=0.0, to=1.0, increment=0.05,
+                                       textvariable=self.mean_icc_threshold, width=10)
+        mean_icc_spinbox.pack(side="left", padx=5)
                 
         select_combo.bind("<<ComboboxSelected>>", on_cluster_select_change)
 
@@ -461,23 +439,8 @@ class RobustnessGUI:
         self.widgets['remove_higher_radio'] = var_higher
         
     def _setup_controls(self, parent):
-
         control_frame = ttk.Frame(parent)
         control_frame.pack(fill="x", pady=10)
-
-        exec_frame = ttk.LabelFrame(control_frame, text=self.get_text('execution_control'), padding="5")
-        exec_frame.pack(side="left", padx=5)
-        self.widgets['execution_control_frame'] = exec_frame
-        
-        start_btn = ttk.Button(exec_frame, text=self.get_text('start_analysis'), 
-                              command=self.start_analysis)
-        start_btn.pack(side="left", padx=2)
-        self.widgets['start_analysis_btn'] = start_btn
-        
-        stop_btn = ttk.Button(exec_frame, text=self.get_text('stop'), 
-                             command=self.stop_analysis)
-        stop_btn.pack(side="left", padx=2)
-        self.widgets['stop_btn'] = stop_btn
 
         viz_frame = ttk.LabelFrame(control_frame, text=self.get_text('visualization'), padding="5")
         viz_frame.pack(side="left", padx=5)
@@ -497,9 +460,16 @@ class RobustnessGUI:
                              command=self.show_correlation_matrix)
         corr_btn.pack(side="left", padx=2)
         self.widgets['show_correlation_btn'] = corr_btn
+
+        start_button_container = ttk.Frame(control_frame)
+        start_button_container.pack(fill="x", expand=True)
+
+        start_btn = ttk.Button(start_button_container, text="🚀 开始分析", 
+                              command=self.start_analysis)
+        start_btn.pack(anchor="center")
+        self.widgets['start_analysis_btn'] = start_btn
         
     def _setup_log_display(self, parent):
-
         log_frame = ttk.LabelFrame(parent, text=self.get_text('run_log'), padding="5")
         log_frame.pack(fill="both", expand=True, pady=5)
         self.widgets['run_log_frame'] = log_frame
@@ -510,14 +480,11 @@ class RobustnessGUI:
         self.log_text.insert(tk.END, self.get_text('welcome_msg').strip())
                 
     def log_message(self, message):
-
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_text.insert(tk.END, f"\n[{timestamp}] {message}")
         self.log_text.see(tk.END)
-        self.parent.update()
         
     def select_input_file(self):
-
         filename = filedialog.askopenfilename(
             title=self.get_text('select_input_file'),
             filetypes=[("CSV文件", "*.csv"), ("所有文件", "*.*")]
@@ -526,13 +493,11 @@ class RobustnessGUI:
             self.input_file.set(filename)
             
     def select_output_path(self):
-
         path = filedialog.askdirectory(title=self.get_text('select_output_path'))
         if path:
             self.output_path.set(path)
             
     def start_analysis(self):
-
         if not self.input_file.get():
             messagebox.showerror(self.get_text('error'), self.get_text('file_not_selected'))
             return
@@ -541,58 +506,113 @@ class RobustnessGUI:
             messagebox.showerror(self.get_text('error'), self.get_text('output_not_selected'))
             return
             
+        self.widgets['start_analysis_btn'].config(state="disabled")
+        
+        self.analysis_thread = threading.Thread(target=self._run_analysis_thread)
+        self.analysis_thread.daemon = True
+        self.analysis_thread.start()
+        
+        self._poll_analysis_queue()
+
+    def _run_analysis_thread(self):
         try:
-            self.log_message(self.get_text('loading_data'))
+            self.queue.put(('log', self.get_text('loading_data')))
             self.load_data()
-            self.log_message(self.get_text('data_loaded'))
+            self.queue.put(('log', self.get_text('data_loaded')))
+            self.queue.put(('log', f"加载了 {len(self.cases)} 个病例，{len(self.features)} 个特征，{len(self.conditions)} 个条件"))
 
-            self.log_message(self.get_text('calculating_icc'))
+            self.queue.put(('log', self.get_text('calculating_icc')))
             self.calculate_icc()
-            self.log_message(self.get_text('icc_complete'))
+            self.queue.put(('log', self.get_text('icc_complete')))
 
-            self.log_message(self.get_text('performing_clustering'))
+            self._filter_by_icc_threshold()
+
+            if len(self.features) < self.n_clusters.get():
+                self.log_message(f"错误: 预筛选后特征数量({len(self.features)})少于聚类数量({self.n_clusters.get()})，无法继续。")
+                self.log_message("建议降低ICC筛选阈值或减少聚类数量。")
+                raise ValueError("预筛选后特征不足，无法进行聚类。")
+
+            self.queue.put(('log', self.get_text('performing_clustering')))
             self.perform_clustering()
-            self.log_message(self.get_text('clustering_complete'))
+            self.queue.put(('log', self.get_text('clustering_complete')))
 
-            self.log_message(self.get_text('analyzing_correlation'))
+            self.queue.put(('log', self.get_text('analyzing_correlation')))
             self.analyze_correlation()
-            self.log_message(self.get_text('correlation_complete'))
+            self.queue.put(('log', self.get_text('correlation_complete')))
 
-            self.log_message(self.get_text('saving_results'))
+            self.queue.put(('log', self.get_text('saving_results')))
             self.save_results()
             
-            self.log_message(self.get_text('analysis_complete'))
-            messagebox.showinfo(self.get_text('success'), self.get_text('analysis_complete'))
+            self.queue.put(('log', self.get_text('analysis_complete')))
+            self.queue.put(('success', self.get_text('analysis_complete')))
             
         except Exception as e:
-            self.log_message(f"❌ {self.get_text('error')}: {str(e)}")
-            messagebox.showerror(self.get_text('error'), str(e))
+            error_msg = f"❌ {self.get_text('error')}: {str(e)}"
+            self.queue.put(('log', error_msg))
+            self.queue.put(('error', str(e)))
+        finally:
+            self.queue.put(('finished', None))
+
+    def _poll_analysis_queue(self):
+        try:
+            message_type, data = self.queue.get_nowait()
+            
+            if message_type == 'log':
+                self.log_message(data)
+            elif message_type == 'success':
+                messagebox.showinfo(self.get_text('success'), data)
+            elif message_type == 'error':
+                messagebox.showerror(self.get_text('error'), data)
+            elif message_type == 'finished':
+                self.widgets['start_analysis_btn'].config(state="normal")
+                return
+
+        except:
+            pass
+
+        self.parent.after(100, self._poll_analysis_queue)
             
     def load_data(self):
-
         self.feature_data = pd.read_csv(self.input_file.get(), index_col=0)
 
         self.parse_features_and_conditions()
         
-        self.log_message(f"加载了 {len(self.cases)} 个病例，{len(self.features)} 个特征，{len(self.conditions)} 个条件")
         
     def parse_features_and_conditions(self):
-
         columns = self.feature_data.columns.tolist()
 
-        self.features = []
+        base_feature_names = set()
+        gold_cols = [c for c in columns if c.endswith('_gold')]
+        
+        if not gold_cols:
+            gold_cols = [c for c in columns if c.endswith('_original')]
+        
+        if not gold_cols:
+            messagebox.showerror("输入文件错误", "输入文件中必须包含带有 '_gold' 或 '_original' 后缀的列作为金标准。")
+            raise ValueError("未找到金标准列 ('_gold' 或 '_original')。")
+
+        for col in gold_cols:
+            if col.endswith('_gold'):
+                base_feature_names.add(col[:-5])
+            elif col.endswith('_original'):
+                base_feature_names.add(col[:-9])
+
+        sorted_base_features = sorted(list(base_feature_names), key=len, reverse=True)
+
+        self.features = sorted_base_features
         self.conditions = []
         feature_condition_map = {}
         
         for col in columns:
-            parts = col.rsplit('_', 1)
-            if len(parts) == 2:
-                feature_name, condition = parts
-                if feature_name not in self.features:
-                    self.features.append(feature_name)
-                if condition not in self.conditions:
-                    self.conditions.append(condition)
-                feature_condition_map[col] = (feature_name, condition)
+            matched = False
+            for feature in self.features:
+                if col.startswith(feature + '_'):
+                    condition = col[len(feature) + 1:]
+                    if condition and condition not in self.conditions:
+                        self.conditions.append(condition)
+                    feature_condition_map[col] = (feature, condition)
+                    matched = True
+                    break
         
         self.feature_condition_map = feature_condition_map
         self.cases = self.feature_data.index.tolist()
@@ -600,22 +620,35 @@ class RobustnessGUI:
         if 'gold' in self.conditions:
             self.conditions.remove('gold')
             self.conditions.insert(0, 'gold')
+
             
     def calculate_icc(self):
+        self.feature_data = self.feature_data.replace([np.inf, -np.inf], np.nan)
+        
+        self.feature_data = self.feature_data.dropna(axis=1, how='all')
+        
+        numeric_columns = self.feature_data.select_dtypes(include=[np.number]).columns
+        for col in numeric_columns:
+            col_data = self.feature_data[col]
+            if col_data.std() > 0:
+                mean_val = col_data.mean()
+                std_val = col_data.std()
+                self.feature_data[col] = col_data.where(
+                    (col_data <= mean_val + 10*std_val) & 
+                    (col_data >= mean_val - 10*std_val), 
+                    np.nan
+                )
 
         num_features = len(self.features)
-        num_conditions = len(self.conditions) - 1
-        self.icc_matrix = pd.DataFrame(
-            index=self.features,
-            columns=[c for c in self.conditions if c != 'gold']
-        )
+        columns_for_icc = [c for c in self.conditions if c not in ['gold', 'original']]
+        self.icc_matrix = pd.DataFrame(index=self.features, columns=columns_for_icc)
 
         for feature in self.features:
-            for condition in self.conditions:
-                if condition == 'gold':
-                    continue
-
+            for condition in columns_for_icc:
                 gold_col = f"{feature}_gold"
+                if gold_col not in self.feature_data.columns:
+                    gold_col = f"{feature}_original"
+                
                 condition_col = f"{feature}_{condition}"
                 
                 if gold_col in self.feature_data.columns and condition_col in self.feature_data.columns:
@@ -623,52 +656,113 @@ class RobustnessGUI:
                     for case in self.cases:
                         gold_value = self.feature_data.loc[case, gold_col]
                         condition_value = self.feature_data.loc[case, condition_col]
+                        data_for_icc.append({'case': case, 'rater': 'gold', 'value': gold_value})
+                        data_for_icc.append({'case': case, 'rater': condition, 'value': condition_value})
 
-                        data_for_icc.append({
-                            'case': case,
-                            'rater': 'gold',
-                            'value': gold_value
-                        })
-                        data_for_icc.append({
-                            'case': case,
-                            'rater': condition,
-                            'value': condition_value
-                        })
+                    icc_df = pd.DataFrame(data_for_icc).dropna(subset=['value'])
 
-                    icc_df = pd.DataFrame(data_for_icc)
+                    n_cases = icc_df['case'].nunique()
+                    n_raters = icc_df['rater'].nunique()
+                    value_var = icc_df['value'].var()
+
+                    log_prefix = f"跳过 {feature} vs {condition}:"
+                    if n_cases < 2:
+                        self.log_message(f"{log_prefix} 病例数不足 ({n_cases})")
+                        self.icc_matrix.loc[feature, condition] = np.nan
+                        continue
+                    if n_raters < 2:
+                        self.log_message(f"{log_prefix} 测量/条件数不足 ({n_raters})")
+                        self.icc_matrix.loc[feature, condition] = np.nan
+                        continue
+                    if value_var < 1e-8:
+                        self.log_message(f"{log_prefix} 特征值方差为零或过小")
+                        self.icc_matrix.loc[feature, condition] = np.nan
+                        continue
 
                     try:
                         icc_result = pg.intraclass_corr(
                             data=icc_df,
                             targets='case',
                             raters='rater',
-                            ratings='value',
-                            confidence=self.icc_confidence.get()
-                        )
+                            ratings='value'
+                        ).set_index('Type')
 
-                        if self.icc_type.get() == "ICC(2,k)":
-                            icc_value = icc_result[icc_result['Type'] == 'ICC2k']['ICC'].values[0]
-                        else: 
-                            icc_value = icc_result[icc_result['Type'] == 'ICC3k']['ICC'].values[0]
-                        
-                        self.icc_matrix.loc[feature, condition] = icc_value
-                        
+                        icc_key_to_extract = 'ICC3k' if self.icc_type.get() == "ICC(3,k)" else 'ICC2k'
+
+                        if icc_key_to_extract in icc_result.index:
+                            icc_value = icc_result.loc[icc_key_to_extract, 'ICC']
+                            
+                            if pd.notna(icc_value) and -1.0 <= icc_value <= 1.0:
+                                self.icc_matrix.loc[feature, condition] = icc_value
+                            else:
+                                self.icc_matrix.loc[feature, condition] = np.nan
+                        else:
+                            self.icc_matrix.loc[feature, condition] = np.nan
+
                     except Exception as e:
                         self.log_message(f"计算 {feature} vs {condition} 的ICC时出错: {str(e)}")
                         self.icc_matrix.loc[feature, condition] = np.nan
 
-        self.icc_matrix = self.icc_matrix.astype(float)
+        self.icc_matrix = self.icc_matrix.apply(pd.to_numeric, errors='coerce')
+
+        self.icc_matrix.dropna(axis=1, how='all', inplace=True)
 
         self.icc_matrix['mean_icc'] = self.icc_matrix.mean(axis=1)
         self.icc_matrix['min_icc'] = self.icc_matrix.min(axis=1)
+
+        self.icc_matrix.replace([np.inf, -np.inf], np.nan, inplace=True)
+        
+        if self.icc_matrix.empty or self.icc_matrix['mean_icc'].isnull().all():
+            self.log_message("错误：所有特征的ICC值均未能成功计算，无法进行后续分析。")
+            messagebox.showerror("计算错误", "所有特征的ICC值均未能成功计算，请检查输入数据和日志。")
+            return
+
+        nan_features_count = self.icc_matrix['mean_icc'].isnull().sum()
+        if nan_features_count > 0:
+            nan_features = self.icc_matrix[self.icc_matrix['mean_icc'].isnull()].index.tolist()
+            self.log_message(f"警告: {nan_features_count} 个特征的ICC值未能成功计算: {', '.join(nan_features[:3])}...")
+            self.icc_matrix.dropna(subset=['mean_icc'], inplace=True)
+            self.features = self.icc_matrix.index.tolist()
         
         self.log_message(f"ICC计算完成，平均ICC范围: {self.icc_matrix['mean_icc'].min():.3f} - {self.icc_matrix['mean_icc'].max():.3f}")
-        
-    def perform_clustering(self):
 
-        cluster_data = self.icc_matrix.drop(['mean_icc', 'min_icc'], axis=1)
+    def _filter_by_icc_threshold(self):
+        if not self.enable_icc_filter.get():
+            return
+
+        min_thresh = self.min_icc_threshold.get()
+        mean_thresh = self.mean_icc_threshold.get()
         
+        self.log_message(f"执行ICC预筛选：min_icc >= {min_thresh} AND mean_icc >= {mean_thresh}")
+        
+        initial_feature_count = len(self.icc_matrix)
+        
+        mask = (self.icc_matrix['min_icc'] >= min_thresh) & (self.icc_matrix['mean_icc'] >= mean_thresh)
+        
+        self.icc_matrix = self.icc_matrix.loc[mask]
+        
+        self.features = self.icc_matrix.index.tolist()
+        
+        final_feature_count = len(self.icc_matrix)
+        removed_count = initial_feature_count - final_feature_count
+        
+        self.log_message(f"ICC预筛选完成：移除了 {removed_count} 个不稳健特征，保留 {final_feature_count} 个。")
+
+    def perform_clustering(self):
+        cluster_data = self.icc_matrix.drop(['mean_icc', 'min_icc', 'cluster'], axis=1, errors='ignore')
+        
+        cluster_data.dropna(how='all', inplace=True)
+        
+        cluster_data = cluster_data.apply(lambda row: row.fillna(row.mean()), axis=1)
+
+        cluster_data.fillna(0, inplace=True)
+        
+        if cluster_data.shape[0] < 2:
+            self.log_message("错误：有效特征数量不足（<2），无法进行聚类分析")
+            return
+
         if self.distance_metric.get() == 'correlation':
+            cluster_data.loc[(cluster_data==0).all(axis=1)] = np.random.rand(cluster_data.shape[1]) * 1e-6
             dist_matrix = pdist(cluster_data, metric='correlation')
         else:
             dist_matrix = pdist(cluster_data, metric='euclidean')
@@ -680,16 +774,15 @@ class RobustnessGUI:
 
         cluster_labels = hierarchy.fcluster(self.linkage_matrix, n_clusters, criterion='maxclust')
 
-        self.icc_matrix['cluster'] = cluster_labels
+        self.icc_matrix['cluster'] = pd.Series(cluster_labels, index=cluster_data.index)
 
         best_cluster = self._select_best_cluster()
-
+        
         self.selected_features = self.icc_matrix[self.icc_matrix['cluster'] == best_cluster].index.tolist()
         
         self.log_message(f"聚类完成，选择了簇 {best_cluster}，包含 {len(self.selected_features)} 个特征")
 
     def suggest_optimal_clusters(self):
-
         if self.icc_matrix is None:
             messagebox.showwarning(self.get_text('warning'), self.get_text('calculate_icc_first'))
             return
@@ -705,7 +798,6 @@ class RobustnessGUI:
             messagebox.showerror(self.get_text('error'), f"{self.get_text('cannot_calculate_suggestion')}{str(e)}")
         
     def _find_optimal_clusters(self):
-
         max_clusters = min(10, len(self.features) // 2)
         inertias = []
         
@@ -729,22 +821,36 @@ class RobustnessGUI:
         return optimal_k
         
     def _select_best_cluster(self):
+        if 'cluster' not in self.icc_matrix.columns or self.icc_matrix['cluster'].isnull().all():
+            self.log_message("警告: 未能成功分配聚类标签，无法选择最佳簇。")
+            return 1
 
-        cluster_stats = self.icc_matrix.groupby('cluster').agg({
-            'mean_icc': ['mean', 'min', 'count']
-        })
+        cluster_stats = self.icc_matrix.groupby('cluster').agg(
+            avg_of_mean_icc=('mean_icc', 'mean'),
+            min_of_min_icc=('min_icc', 'min')
+        )
+
+        selection_strategy = self.cluster_selection.get()
+        best_cluster = None
+
+        if selection_strategy == 'mean_icc':
+            best_cluster = cluster_stats['avg_of_mean_icc'].idxmax()
+            self.log_message(f"簇选择策略('mean_icc'): 选择平均ICC最高的簇 -> 簇 {best_cluster}")
         
-        if self.cluster_selection.get() == 'mean_icc':
-            best_cluster = cluster_stats['mean_icc']['mean'].idxmax()
-        elif self.cluster_selection.get() == 'min_icc':
-            best_cluster = cluster_stats['mean_icc']['min'].idxmax()
+        elif selection_strategy == 'min_icc':
+            best_cluster = cluster_stats['min_of_min_icc'].idxmax()
+            self.log_message(f"簇选择策略('min_icc'): 选择最小ICC值最高的簇 -> 簇 {best_cluster}")
+
         else:
-            best_cluster = 1
-            
+            if not cluster_stats.empty:
+                best_cluster = cluster_stats.index[0]
+            else:
+                best_cluster = 1
+            self.log_message(f"簇选择策略('manual'): 默认选择第一个可用簇 -> 簇 {best_cluster}")
+
         return best_cluster
         
     def analyze_correlation(self):
-
         selected_data = pd.DataFrame()
         
         for feature in self.selected_features:
@@ -795,12 +901,7 @@ class RobustnessGUI:
         self.log_message(f"最终保留 {len(self.final_features)} 个特征")
         
     def save_results(self):
-
         output_dir = self.output_path.get()
-
-        icc_file = os.path.join(output_dir, 'robustness_summary_matrix.csv')
-        self.icc_matrix.to_csv(icc_file)
-        self.log_message(f"{self.get_text('results_saved')} {icc_file}")
 
         final_features_df = pd.DataFrame({
             'feature': self.final_features,
@@ -811,30 +912,9 @@ class RobustnessGUI:
         final_features_df.to_csv(final_file, index=False)
         self.log_message(f"{self.get_text('results_saved')} {final_file}")
 
-        params = {
-            'input_file': self.input_file.get(),
-            'analysis_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'icc_type': self.icc_type.get(),
-            'icc_confidence': self.icc_confidence.get(),
-            'linkage_method': self.linkage_method.get(),
-            'distance_metric': self.distance_metric.get(),
-            'cluster_selection': self.cluster_selection.get(),
-            'correlation_threshold': self.correlation_threshold.get(),
-            'variance_criterion': self.variance_criterion.get(),
-            'num_initial_features': len(self.features),
-            'num_selected_features': len(self.selected_features),
-            'num_final_features': len(self.final_features)
-        }
-        
-        params_file = os.path.join(output_dir, 'analysis_parameters.json')
-        with open(params_file, 'w', encoding='utf-8') as f:
-            json.dump(params, f, indent=2, ensure_ascii=False)
-        self.log_message(f"{self.get_text('results_saved')} {params_file}")
-
         self.save_detailed_report(output_dir)
         
     def save_detailed_report(self, output_dir):
-
         report_file = os.path.join(output_dir, 'analysis_report.txt')
         
         with open(report_file, 'w', encoding='utf-8') as f:
@@ -863,13 +943,8 @@ class RobustnessGUI:
                 
         self.log_message(f"{self.get_text('results_saved')} {report_file}")
         
-    def stop_analysis(self):
-
-        self.log_message("⏹ 分析已停止")
-        messagebox.showinfo(self.get_text('info'), "当前版本不支持中途停止")
         
     def show_icc_heatmap(self):
-
         if self.icc_matrix is None:
             messagebox.showwarning(self.get_text('warning'), "请先运行分析")
             return
@@ -895,7 +970,6 @@ class RobustnessGUI:
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         
     def show_dendrogram(self):
-
         if self.linkage_matrix is None:
             messagebox.showwarning(self.get_text('warning'), "请先运行分析")
             return
@@ -918,7 +992,6 @@ class RobustnessGUI:
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         
     def show_correlation_matrix(self):
-
         if self.correlation_matrix is None:
             messagebox.showwarning(self.get_text('warning'), "请先运行分析")
             return
