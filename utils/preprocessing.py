@@ -13,20 +13,20 @@ class Preprocessor:
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
 
-    
+
     def preprocess_for_texture(self, image: np.ndarray, mask: np.ndarray,
                             original_spacing: List[float],
                             target_spacing: List[float] = None,
                             target_size: List[int] = None,
                             bin_width: float = 16) -> Tuple[np.ndarray, np.ndarray]:
 
-        self.logger.info("纹理特征预处理开始")
+        self.logger.info("开始执行纹理特征预处理...")
 
         if target_size is None:
-            target_size = [512, 512]  
+            target_size = [512, 512]
 
         resampled_image, _ = self.resample_image(
-            image, original_spacing, target_size=target_size, 
+            image, original_spacing, target_size=target_size,
             interpolation='linear', is_label=False
         )
         resampled_mask, _ = self.resample_image(
@@ -34,28 +34,60 @@ class Preprocessor:
             interpolation='nearest', is_label=True
         )
 
-        normalized_image = self.normalize_intensity_zscore(
-            resampled_image, resampled_mask
-        )
+        if not np.any(resampled_mask > 0):
+            self.logger.warning("重采样后的ROI为空。返回全黑图像。")
+            return np.zeros_like(resampled_image, dtype=np.int32), resampled_mask
 
-        discretized_image = self.discretize_intensity(
-            normalized_image, bin_width=bin_width
-        )
+        roi_pixels = resampled_image[resampled_mask > 0]
         
-        return discretized_image, resampled_mask
-    
+        p1, p99 = np.percentile(roi_pixels, [1, 99])
+        if p99 <= p1:
+            self.logger.warning("ROI内像素值范围过小，使用最小-最大标准化")
+            roi_min, roi_max = np.min(roi_pixels), np.max(roi_pixels)
+            if roi_max > roi_min:
+                normalized_image = (resampled_image - roi_min) / (roi_max - roi_min)
+            else:
+                normalized_image = np.zeros_like(resampled_image, dtype=np.float64)
+        else:
+            normalized_image = (resampled_image - p1) / (p99 - p1)
+            normalized_image = np.clip(normalized_image, 0, 1)
+
+        normalized_roi_pixels = normalized_image[resampled_mask > 0]
+        
+        roi_range = np.max(normalized_roi_pixels) - np.min(normalized_roi_pixels)
+        if roi_range < 1e-6:
+            self.logger.warning("标准化后ROI内像素变化极小，设置为单一值")
+            final_image = np.ones_like(resampled_image, dtype=np.int32)
+            final_image[resampled_mask == 0] = 0
+        else:
+            min_val = np.min(normalized_roi_pixels)
+            max_val = np.max(normalized_roi_pixels)
+            
+            num_bins = max(8, min(64, int((max_val - min_val) * 255 / bin_width)))
+            
+            bins = np.linspace(min_val, max_val, num_bins + 1)
+            discretized_roi_pixels = np.digitize(normalized_roi_pixels, bins)
+            
+            discretized_roi_pixels = np.clip(discretized_roi_pixels, 1, num_bins)
+            
+            final_image = np.zeros_like(resampled_image, dtype=np.int32)
+            final_image[resampled_mask > 0] = discretized_roi_pixels
+
+        unique_levels = len(np.unique(final_image[resampled_mask > 0]))
+        self.logger.info(f"纹理预处理完成。离散化级别数: {unique_levels}")
+
+        return final_image, resampled_mask
+
+
     def preprocess_for_fractal(self, image: np.ndarray, mask: np.ndarray,
                             original_spacing: List[float],
                             target_spacing: List[float] = None,
-                            target_size: List[int] = None,
-                            window_center: float = 128,
-                            window_width: float = 255,
-                            threshold_percentile: float = 65) -> Tuple[np.ndarray, np.ndarray]:
+                            target_size: List[int] = None) -> Tuple[np.ndarray, np.ndarray]:
 
-        self.logger.info("分形维度预处理开始")
+        self.logger.info("开始执行分形维度预处理...")
 
         if target_size is None:
-            target_size = [512, 512]  
+            target_size = [512, 512]
 
         resampled_image, _ = self.resample_image(
             image, original_spacing, target_size=target_size,
@@ -66,21 +98,42 @@ class Preprocessor:
             interpolation='nearest', is_label=True
         )
         
-        image_8bit = self.convert_to_8bit(resampled_image)
-
-        windowed_image = self.apply_windowing(
-            image_8bit, window_center, window_width
-        )
-
-        binary_image = self.binarize(
-            windowed_image, method='percentile', 
-            percentile=threshold_percentile
-        )
-
-        binary_image = binary_image * (resampled_mask > 0)
-
-        edges = self.detect_edges(binary_image, method='canny')
+        if not np.any(resampled_mask > 0):
+            self.logger.warning("分形预处理：ROI为空。")
+            return np.zeros_like(resampled_image, dtype=np.uint8), resampled_mask
+            
+        roi_pixels = resampled_image[resampled_mask > 0]
+        p2, p98 = np.percentile(roi_pixels, (2, 98))
         
+        if p98 <= p2:
+            image_8bit = np.zeros_like(resampled_image, dtype=np.uint8)
+        else:
+            image_clipped = np.clip(resampled_image, p2, p98)
+            image_normalized = (image_clipped - p2) / (p98 - p2)
+            image_8bit = (image_normalized * 255).astype(np.uint8)
+
+        window_center = 128
+        window_width = 255
+        windowed = self.apply_windowing(image_8bit, window_center, window_width)
+
+        threshold_percentile = 65
+        roi_windowed = windowed[resampled_mask > 0]
+        if len(roi_windowed) > 0:
+            threshold_value = np.percentile(roi_windowed, threshold_percentile)
+            binary = (windowed > threshold_value).astype(np.uint8)
+            binary[resampled_mask == 0] = 0
+        else:
+            binary = np.zeros_like(windowed, dtype=np.uint8)
+
+        if np.any(binary):
+            edges = cv2.Canny(binary * 255, 50, 150)
+            edges[resampled_mask == 0] = 0
+        else:
+            edges = np.zeros_like(binary, dtype=np.uint8)
+
+        edge_density = np.sum(edges > 0) / np.sum(resampled_mask > 0) if np.sum(resampled_mask > 0) > 0 else 0
+        self.logger.info(f"边缘检测完成。边缘密度: {edge_density:.4f} ({np.sum(edges > 0)} 像素)")
+
         return edges, resampled_mask
     
     def preprocess_for_signal_intensity(self, image: np.ndarray, mask: np.ndarray,
@@ -227,16 +280,24 @@ class Preprocessor:
                                 mask: Optional[np.ndarray] = None,
                                 robust: bool = False,  
                                 exclude_percentile: float = 0.0) -> np.ndarray:  
- 
+
+        normalized_image = image.copy().astype(np.float64)
+
         if mask is not None and np.any(mask > 0):
             mask = mask.astype(bool)
-            valid_pixels = image[mask]
+            valid_pixels = normalized_image[mask]
         else:
-            valid_pixels = image.flatten()
+            mask = np.ones_like(normalized_image, dtype=bool)
+            valid_pixels = normalized_image.flatten()
         
-        if len(valid_pixels) == 0:
-            self.logger.warning("没有有效像素，返回原始图像")
-            return image.copy()
+        if valid_pixels.size == 0:
+            self.logger.warning("在Z-score标准化中，ROI为空或掩码无效，返回原始图像的副本。")
+            return normalized_image
+        
+        if len(valid_pixels) < 2:
+            self.logger.warning("ROI像素过少，无法计算有效的统计量")
+            normalized_image[mask] = 0.0
+            return normalized_image
 
         if exclude_percentile > 0:
             p_low = np.percentile(valid_pixels, exclude_percentile)
@@ -248,23 +309,22 @@ class Preprocessor:
             q25 = np.percentile(valid_pixels, 25)
             q75 = np.percentile(valid_pixels, 75)
             iqr = q75 - q25
-            std_val = iqr / 1.349 if iqr > 0 else 1.0
+            std_val = iqr / 1.349 if iqr > 1e-6 else 1e-6
             mean_val = median_val
-            
             self.logger.info(f"鲁棒统计量: median={mean_val:.3f}, IQR_std={std_val:.3f}")
         else:
             mean_val = np.mean(valid_pixels)
             std_val = np.std(valid_pixels)
-            
             self.logger.info(f"传统统计量: mean={mean_val:.3f}, std={std_val:.3f}")
         
-        if std_val <= 0:
-            std_val = 1.0
-            self.logger.warning("标准差为0，设置为1.0")
-
-        normalized = (image - mean_val) / std_val
+        epsilon = 1e-6
+        if std_val > epsilon:
+            normalized_image[mask] = (valid_pixels - mean_val) / std_val
+        else:
+            self.logger.warning(f"ROI内标准差 ({std_val:.2e}) 过小或为0。ROI将被设置为0。")
+            normalized_image[mask] = 0.0
         
-        return normalized
+        return normalized_image
     
     def resample_image(self, image: Union[np.ndarray, sitk.Image], 
                         original_spacing: List[float],
