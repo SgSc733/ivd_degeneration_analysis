@@ -6,6 +6,7 @@ from .t2si_calculator import T2SignalIntensityCalculator
 from .gabor_calculator import GaborCalculator
 from .hu_moments_calculator import HuMomentsCalculator
 from .texture_features_calculator import TextureFeaturesCalculator
+from .dscr_calculator import DSCRCalculator
 
 __all__ = [
     'BaseCalculator',
@@ -15,5 +16,6 @@ __all__ = [
     'T2SignalIntensityCalculator',
     'GaborCalculator',
     'HuMomentsCalculator',
-    'TextureFeaturesCalculator'
+    'TextureFeaturesCalculator',
+    'DSCRCalculator'
 ]
