@@ -33,10 +33,26 @@ class FractalDimensionCalculator(BaseCalculator):
 
         roi_normalized = self._normalize_grayscale(roi, mask)
         
-        threshold_value = 255 * self.threshold_percent
+        try:
+            roi_uint8 = roi_normalized.astype(np.uint8)
+            roi_masked = cv2.bitwise_and(roi_uint8, roi_uint8, mask=mask.astype(np.uint8))
+            threshold_value = cv2.threshold(roi_masked, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[0]
+            
+            if threshold_value < 50 or threshold_value > 200:
+                valid_pixels = roi_normalized[mask > 0]
+                threshold_value = np.percentile(valid_pixels, self.threshold_percent * 100)
+                
+        except:
+            threshold_value = 255 * self.threshold_percent
+        
         _, binary = cv2.threshold(roi_normalized, threshold_value, 255, cv2.THRESH_BINARY)
         
-        edges = cv2.Canny(binary.astype(np.uint8), 50, 150)
+        edges = cv2.Canny(binary.astype(np.uint8), 30, 100)
+        
+        if np.sum(edges > 0) < 50:
+            kernel = np.ones((3,3), np.uint8)
+            gradient = cv2.morphologyEx(binary.astype(np.uint8), cv2.MORPH_GRADIENT, kernel)
+            edges = np.maximum(edges, gradient)
         
         edges[mask == 0] = 0
         
@@ -235,16 +251,6 @@ class FractalDimensionCalculator(BaseCalculator):
         
         return avg_result
     
-    def validate_against_pfirrmann(self, fd_value: float) -> str:
-
-        if fd_value < 1.215:  # (1.13 + 1.30) / 2
-            return "Pfirrmann I-II (健康到轻度退变)"
-        elif fd_value < 1.40:  # (1.30 + 1.50) / 2
-            return "Pfirrmann II-III (轻度到中度退变)"
-        elif fd_value < 1.575:  # (1.50 + 1.65) / 2
-            return "Pfirrmann III-IV (中度到重度退变)"
-        else:
-            return "Pfirrmann IV-V (重度退变)"
 
     @monitor_memory(threshold_percent=70)    
     def process_multi_slice_parallel(self, image_slices: List[np.ndarray],
