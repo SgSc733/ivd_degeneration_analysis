@@ -1021,3 +1021,5 @@ glcm_Contrast_geom      # 几何扰动
 [9] van Griethuysen, J. J. M., et al. (2017). Computational Radiomics System to Decode the Radiographic Phenotype. Cancer Research, 77(21), e104–e107.
 
 [10] Lin A, et al. Radiomics based on MRI to predict recurrent L4-5 disc herniation after percutaneous endoscopic lumbar discectomy. BMC Med Imaging. 2024 Oct 10;24(1):273.
+
+[11]孔德兴, 孙剑, 何炳生, 沈纯理. 医学影像精准分析的数学理论与算法. 科学出版社, 2025:74-108
