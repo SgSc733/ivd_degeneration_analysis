@@ -315,11 +315,9 @@ class IntegratedFeatureExtractorGUI:
                                  f"PyRadiomics功能将被禁用:\n\n{PYRADIOMICS_ERROR}\n\n仍可以使用自定义特征提取功能。")
             
     def _start_log_processor(self):
-
         self._process_log_queue()
         
     def _process_log_queue(self):
-
         if self._stop_log_processing:
             return
         
@@ -1404,7 +1402,6 @@ class IntegratedFeatureExtractorGUI:
         self.log_text.insert(tk.END, "🎯 椎间盘退变特征提取系统已就绪\n")
     
     def log_message(self, message):
-
         if threading.current_thread() == threading.main_thread():
             if '\n' in message:
                 lines = message.split('\n')
@@ -1547,94 +1544,118 @@ class IntegratedFeatureExtractorGUI:
                         self.log_message(f"❌ DHI计算失败: {str(e)}")
                         result['dhi_error'] = str(e)
 
-                if self.enable_other_asi.get():
-                    try:
-                        self.log_message("计算ASI...")
-                        asi_slices = []
-                        asi_roi_masks = []
-                        asi_csf_masks = []
-                        
-                        for i, (img_slice, roi_mask) in enumerate(zip(image_slices, roi_masks)):
-                            slice_spacing = spacing[:2] + [1.0]
-                            processed_img, processed_mask = self.preprocessor.preprocess_for_signal_intensity(
-                                img_slice, roi_mask, slice_spacing
-                            )
-                            asi_slices.append(processed_img)
-                            asi_roi_masks.append(processed_mask)
-                            
-                            if csf_masks:
-                                _, processed_csf = self.preprocessor.preprocess_for_signal_intensity(
-                                    img_slice, csf_masks[i], slice_spacing
-                                )
-                                asi_csf_masks.append(processed_csf)
-                        
-                        if csf_masks:
-                            asi_result = self.asi_calculator.process_multi_slice(
-                                asi_slices, asi_roi_masks, asi_csf_masks
-                            )
-                        else:
-                            asi_result = self._calculate_asi_without_csf(asi_slices, asi_roi_masks)
-                        
-                        result.update({f'asi_{k}': v for k, v in asi_result.items()})
-                        self.log_message(f"ASI = {asi_result.get('asi', 'N/A'):.2f}")
-                    except Exception as e:
-                        self.log_message(f"❌ ASI计算失败: {str(e)}")
-                        result['asi_error'] = str(e)
+                processed_image_slices_for_si = None
+                processed_mask_slices_for_si = None
 
-                if self.enable_other_t2si.get():
-                    try:
-                        self.log_message("计算T2信号强度...")
-                        t2si_slices = []
-                        t2si_roi_masks = []
-                        t2si_csf_masks = []
+                if self.enable_other_asi.get() or self.enable_other_t2si.get():
+
+                    processed_image_slices_for_si = []
+                    processed_mask_slices_for_si = []
+                    
+                    for i, img_slice in enumerate(image_slices):
+                        slice_spacing = spacing[:2] + [1.0]
                         
-                        for i, (img_slice, roi_mask) in enumerate(zip(image_slices, roi_masks)):
-                            slice_spacing = spacing[:2] + [1.0]
-                            processed_img, processed_mask = self.preprocessor.preprocess_for_signal_intensity(
-                                img_slice, roi_mask, slice_spacing
-                            )
-                            t2si_slices.append(processed_img)
-                            t2si_roi_masks.append(processed_mask)
+                        processed_img, processed_mask = self.preprocessor.preprocess_for_signal_intensity(
+                            img_slice, mask_slices[i], slice_spacing
+                        )
+                        unique_labels = np.unique(processed_mask)
+
+
+                        processed_image_slices_for_si.append(processed_img)
+                        processed_mask_slices_for_si.append(processed_mask.astype(np.int32))
+
+
+                if self.enable_other_asi.get() and processed_image_slices_for_si:
+                    self.log_message("计算ASI...")
+                    for level_name, labels in self.config.DISC_LABELS.items():
+                        disc_masks_level = [(p_mask.astype(np.int32) == int(labels['disc'])).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
+                        
+                        if not any(np.any(mask) for mask in disc_masks_level):
+                            continue
                             
-                            if csf_masks:
-                                _, processed_csf = self.preprocessor.preprocess_for_signal_intensity(
-                                    img_slice, csf_masks[i], slice_spacing
-                                )
-                                t2si_csf_masks.append(processed_csf)
+                        csf_label = self.csf_label.get()
+                        csf_label_int = int(csf_label)
+                        csf_masks_level = [(p_mask.astype(np.int32) == csf_label_int).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
                         
-                        if csf_masks:
-                            t2si_result = self.t2si_calculator.process_multi_slice(
-                                t2si_slices, t2si_roi_masks, t2si_csf_masks
+                        try:
+                            self.log_message(f"  -> 处理 {level_name} ASI...")
+                            asi_result = self.asi_calculator.process_multi_slice(
+                                processed_image_slices_for_si, disc_masks_level, csf_masks_level
                             )
-                        else:
-                            t2si_result = self._calculate_t2si_global(t2si_slices, t2si_roi_masks)
+                            result.update({f'asi_{level_name}_{k}': v for k, v in asi_result.items()})
+                            self.log_message(f"  -> {level_name} ASI = {asi_result.get('asi', 'N/A'):3f}")
+                        except Exception as e:
+                            self.log_message(f"❌ {level_name} ASI计算失败: {str(e)}")
+                            result[f'asi_{level_name}_error'] = str(e)
+
+                if self.enable_other_t2si.get() and processed_image_slices_for_si:
+                    self.log_message("计算T2信号强度...")
+                    for level_name, labels in self.config.DISC_LABELS.items():
+                        disc_masks_level = [(p_mask.astype(np.int32) == int(labels['disc'])).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
                         
-                        serializable_t2si_result = {k: v for k, v in t2si_result.items() if k != 'slice_results'}
-                        result.update({f't2si_{k}': v for k, v in serializable_t2si_result.items()})
-                        self.log_message(f"T2SI比率 = {t2si_result.get('si_ratio', 'N/A'):.3f}")
-                    except Exception as e:
-                        self.log_message(f"❌ T2SI计算失败: {str(e)}")
-                        result['t2si_error'] = str(e)
-                
+                        if not any(np.any(mask) for mask in disc_masks_level):
+                            continue
+                            
+                        csf_label = self.csf_label.get()
+                        csf_label_int = int(csf_label)
+                        csf_masks_level = [(p_mask.astype(np.int32) == csf_label_int).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
+                        
+                        if level_name in self.config.NP_LABELS:
+                            np_label = self.config.NP_LABELS[level_name]['np']
+                            np_masks_level = [(p_mask == np_label).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
+                            
+                            if not any(np.any(mask) for mask in np_masks_level):
+                                self.log_message(f"  ⚠️ 在 {level_name} 未找到髓核标注（标签{np_label}），使用椎间盘掩码")
+                                np_masks_level = disc_masks_level
+                        else:
+                            np_masks_level = disc_masks_level
+                        
+                        try:
+                            self.log_message(f"  -> 处理 {level_name} T2SI...")
+                            t2si_result = self.t2si_calculator.process_multi_slice(
+                                processed_image_slices_for_si, 
+                                np_masks_level,
+                                csf_masks_level
+                            )
+                            serializable_t2si_result = {k: v for k, v in t2si_result.items() if k != 'slice_results'}
+                            result.update({f't2si_{level_name}_{k}': v for k, v in serializable_t2si_result.items()})
+                            self.log_message(f"  -> {level_name} T2SI比率 = {t2si_result.get('si_ratio', 'N/A'):.3f}")
+                        except Exception as e:
+                            self.log_message(f"❌ {level_name} T2SI计算失败: {str(e)}")
+                            result[f't2si_{level_name}_error'] = str(e)
+            
                 if self.enable_other_fd.get():
                     try:
                         self.log_message("计算分形维度...")
-                        fd_slices = []
-                        fd_masks = []
-                        
-                        for img_slice, roi_mask in zip(image_slices, roi_masks):
-                            slice_spacing = spacing[:2] + [1.0]
-                            edges, processed_mask = self.preprocessor.preprocess_for_fractal(
-                                img_slice, roi_mask, slice_spacing
+                        for level_name, labels in self.config.DISC_LABELS.items():
+                            self.log_message(f"  -> 处理 {level_name} FD...")
+
+                            disc_masks_level = []
+                            for mask_slice in mask_slices:
+                                disc_mask = (mask_slice == labels['disc']).astype(np.uint8)
+                                disc_masks_level.append(disc_mask)
+                            
+                            if not any(np.any(mask) for mask in disc_masks_level):
+                                self.log_message(f"  -> 在 {level_name} 未找到掩码，跳过")
+                                continue
+
+                            fd_slices = []
+                            fd_masks = []
+                            
+                            for i, img_slice in enumerate(image_slices):
+                                slice_spacing = spacing[:2] + [1.0]
+                                edges, processed_mask = self.preprocessor.preprocess_for_fractal(
+                                    img_slice, disc_masks_level[i], slice_spacing
+                                )
+                                fd_slices.append(edges)
+                                fd_masks.append(processed_mask)
+                            
+                            fd_result = self.fd_calculator.process_multi_slice(
+                                fd_slices, fd_masks
                             )
-                            fd_slices.append(edges)
-                            fd_masks.append(processed_mask)
-                        
-                        fd_result = self.fd_calculator.process_multi_slice(
-                            fd_slices, fd_masks
-                        )
-                        result.update({f'fd_{k}': v for k, v in fd_result.items()})
-                        self.log_message(f"FD = {fd_result.get('fd', 'N/A'):.3f}")
+                            result.update({f'fd_{level_name}_{k}': v for k, v in fd_result.items()})
+                            self.log_message(f"  -> {level_name} FD = {fd_result.get('fd', 'N/A'):.3f}")
+
                     except Exception as e:
                         self.log_message(f"❌ FD计算失败: {str(e)}")
                         result['fd_error'] = str(e)
@@ -1642,29 +1663,45 @@ class IntegratedFeatureExtractorGUI:
                 if self.enable_other_gabor.get():
                     try:
                         self.log_message("计算Gabor特征...")
-                        gabor_slices = []
-                        gabor_masks = []
-                        
-                        for img_slice, roi_mask in zip(image_slices, roi_masks):
-                            slice_spacing = spacing[:2] + [1.0]
-                            processed_img, processed_mask = self.preprocessor.preprocess_for_texture(
-                                img_slice, roi_mask, slice_spacing
-                            )
-                            gabor_slices.append(processed_img)
-                            gabor_masks.append(processed_mask)
+                        for level_name, labels in self.config.DISC_LABELS.items():
+                            self.log_message(f"  -> 处理 {level_name} Gabor...")
 
-                        gabor_features = {}
-                        for i, (img, mask) in enumerate(zip(gabor_slices, gabor_masks)):
-                            slice_features = self.gabor_calculator.calculate(img, mask)
-                            for k, v in slice_features.items():
-                                if k in gabor_features:
-                                    gabor_features[k].append(v)
-                                else:
-                                    gabor_features[k] = [v]
+                            disc_masks_level = []
+                            for mask_slice in mask_slices:
+                                disc_mask = (mask_slice == labels['disc']).astype(np.uint8)
+                                disc_masks_level.append(disc_mask)
 
-                        gabor_result = {k: np.mean(v) for k, v in gabor_features.items()}
-                        result.update({f'gabor_{k}': v for k, v in gabor_result.items()})
-                        self.log_message(f"提取了 {len(gabor_result)} 个Gabor特征")
+                            if not any(np.any(mask) for mask in disc_masks_level):
+                                self.log_message(f"  -> 在 {level_name} 未找到掩码，跳过")
+                                continue
+
+                            gabor_slices_level = []
+                            gabor_masks_level = []
+
+                            for i, img_slice in enumerate(image_slices):
+                                slice_spacing = spacing[:2] + [1.0]
+                                processed_img, processed_mask = self.preprocessor.preprocess_for_texture(
+                                    img_slice, disc_masks_level[i], slice_spacing
+                                )
+                                gabor_slices_level.append(processed_img)
+                                gabor_masks_level.append(processed_mask)
+
+                            gabor_features = {}
+                            for i, (img, mask) in enumerate(zip(gabor_slices_level, gabor_masks_level)):
+                                if not np.any(mask): continue 
+                                slice_features = self.gabor_calculator.calculate(img, mask)
+                                for k, v in slice_features.items():
+                                    if k in gabor_features:
+                                        gabor_features[k].append(v)
+                                    else:
+                                        gabor_features[k] = [v]
+
+                            if not gabor_features: continue
+
+                            gabor_result = {k: np.mean(v) for k, v in gabor_features.items()}
+                            result.update({f'gabor_{level_name}_{k}': v for k, v in gabor_result.items()})
+                            self.log_message(f"  -> {level_name} 提取了 {len(gabor_result)} 个Gabor特征")
+
                     except Exception as e:
                         self.log_message(f"❌ Gabor计算失败: {str(e)}")
                         result['gabor_error'] = str(e)
@@ -1672,63 +1709,91 @@ class IntegratedFeatureExtractorGUI:
                 if self.enable_other_hu.get():
                     try:
                         self.log_message("计算Hu不变矩...")
-                        hu_masks = []
-                        
-                        for roi_mask in roi_masks:
-                            slice_spacing = spacing[:2] + [1.0]
-                            binary_mask = self.preprocessor.preprocess_for_shape(
-                                roi_mask, slice_spacing
-                            )
-                            hu_masks.append(binary_mask)
+                        for level_name, labels in self.config.DISC_LABELS.items():
+                            self.log_message(f"  -> 处理 {level_name} Hu矩...")
 
-                        hu_features = {}
-                        for i, mask in enumerate(hu_masks):
-                            slice_features = self.hu_calculator.calculate(mask, mask)
-                            for k, v in slice_features.items():
-                                if k in hu_features:
-                                    hu_features[k].append(v)
-                                else:
-                                    hu_features[k] = [v]
+                            disc_masks_level = []
+                            for mask_slice in mask_slices:
+                                disc_mask = (mask_slice == labels['disc']).astype(np.uint8)
+                                disc_masks_level.append(disc_mask)
 
-                        hu_result = {k: np.mean(v) for k, v in hu_features.items()}
-                        result.update({f'hu_{k}': v for k, v in hu_result.items()})
-                        self.log_message(f"提取了 {len(hu_result)} 个Hu矩特征")
+                            if not any(np.any(mask) for mask in disc_masks_level):
+                                self.log_message(f"  -> 在 {level_name} 未找到掩码，跳过")
+                                continue
+
+                            hu_masks_level = []
+                            for roi_mask in disc_masks_level:
+                                slice_spacing = spacing[:2] + [1.0]
+                                binary_mask = self.preprocessor.preprocess_for_shape(
+                                    roi_mask, slice_spacing
+                                )
+                                hu_masks_level.append(binary_mask)
+
+                            hu_features = {}
+                            for i, mask in enumerate(hu_masks_level):
+                                if not np.any(mask): continue
+                                slice_features = self.hu_calculator.calculate(mask, mask)
+                                for k, v in slice_features.items():
+                                    if k in hu_features:
+                                        hu_features[k].append(v)
+                                    else:
+                                        hu_features[k] = [v]
+                            
+                            if not hu_features: continue
+
+                            hu_result = {k: np.mean(v) for k, v in hu_features.items()}
+                            result.update({f'hu_{level_name}_{k}': v for k, v in hu_result.items()})
+                            self.log_message(f"  -> {level_name} 提取了 {len(hu_result)} 个Hu矩特征")
+
                     except Exception as e:
                         self.log_message(f"❌ Hu矩计算失败: {str(e)}")
                         result['hu_error'] = str(e)
 
                 if self.enable_other_texture.get():
                     try:
-                        self.log_message("计算扩展纹理特征...")
-                        texture_slices = []
-                        texture_masks = []
-                        
-                        for img_slice, roi_mask in zip(image_slices, roi_masks):
-                            slice_spacing = spacing[:2] + [1.0]
-                            processed_img, processed_mask = self.preprocessor.preprocess_for_texture(
-                                img_slice, roi_mask, slice_spacing
-                            )
-                            texture_slices.append(processed_img)
-                            texture_masks.append(processed_mask)
+                        self.log_message("计算扩展纹理特征 (按椎间盘级别)...")
+                        for level_name, labels in self.config.DISC_LABELS.items():
+                            self.log_message(f"  -> 处理 {level_name} 扩展纹理...")
 
-                        texture_features = {}
-                        for i, (img, mask) in enumerate(zip(texture_slices, texture_masks)):
-                            slice_features = self.texture_calculator.calculate(img, mask)
-                            for k, v in slice_features.items():
-                                if k in texture_features:
-                                    texture_features[k].append(v)
-                                else:
-                                    texture_features[k] = [v]
+                            disc_masks_level = []
+                            for mask_slice in mask_slices:
+                                disc_mask = (mask_slice == labels['disc']).astype(np.uint8)
+                                disc_masks_level.append(disc_mask)
 
-                        texture_result = {k: np.mean(v) for k, v in texture_features.items()}
-                        result.update({f'texture_{k}': v for k, v in texture_result.items()})
-                        self.log_message(f"提取了 {len(texture_result)} 个纹理特征")
+                            if not any(np.any(mask) for mask in disc_masks_level):
+                                self.log_message(f"  -> 在 {level_name} 未找到掩码，跳过")
+                                continue
+
+                            texture_slices_level = []
+                            texture_masks_level = []
+                            for i, img_slice in enumerate(image_slices):
+                                slice_spacing = spacing[:2] + [1.0]
+                                processed_img, processed_mask = self.preprocessor.preprocess_for_texture(
+                                    img_slice, disc_masks_level[i], slice_spacing
+                                )
+                                texture_slices_level.append(processed_img)
+                                texture_masks_level.append(processed_mask)
+
+                            texture_features = {}
+                            for i, (img, mask) in enumerate(zip(texture_slices_level, texture_masks_level)):
+                                if not np.any(mask): continue
+                                slice_features = self.texture_calculator.calculate(img, mask)
+                                for k, v in slice_features.items():
+                                    if k in texture_features:
+                                        texture_features[k].append(v)
+                                    else:
+                                        texture_features[k] = [v]
+                            
+                            if not texture_features: continue
+
+                            texture_result = {k: np.mean(v) for k, v in texture_features.items()}
+                            result.update({f'texture_{level_name}_{k}': v for k, v in texture_result.items()})
+                            self.log_message(f"  -> {level_name} 提取了 {len(texture_result)} 个扩展纹理特征")
+
                     except Exception as e:
-                        self.log_message(f"❌ 纹理特征计算失败: {str(e)}")
+                        self.log_message(f"❌ 扩展纹理特征计算失败: {str(e)}")
                         result['texture_error'] = str(e)
-                
-                result['status'] = 'success'
-                results = {'results': [result]}
+
 
                 if self.enable_other_dscr.get():
                     try:
@@ -1778,6 +1843,9 @@ class IntegratedFeatureExtractorGUI:
                         self.log_message(f"❌ DSCR计算失败: {str(e)}")
                         result['dscr_error'] = str(e)
                 
+                result['status'] = 'success'
+                results = {'results': [result]}
+
             else:
                 input_dir = self.input_path.get()
                 mask_dir = self.mask_path.get()
@@ -1886,94 +1954,118 @@ class IntegratedFeatureExtractorGUI:
                                 self.log_message(f"❌ DHI计算失败: {str(e)}")
                                 result['dhi_error'] = str(e)
 
-                        if self.enable_other_asi.get():
-                            try:
-                                self.log_message("计算ASI...")
-                                asi_slices = []
-                                asi_roi_masks = []
-                                asi_csf_masks = []
-                                
-                                for i, (img_slice, roi_mask) in enumerate(zip(image_slices, roi_masks)):
-                                    slice_spacing = spacing[:2] + [1.0]
-                                    processed_img, processed_mask = self.preprocessor.preprocess_for_signal_intensity(
-                                        img_slice, roi_mask, slice_spacing
-                                    )
-                                    asi_slices.append(processed_img)
-                                    asi_roi_masks.append(processed_mask)
-                                    
-                                    if csf_masks:
-                                        _, processed_csf = self.preprocessor.preprocess_for_signal_intensity(
-                                            img_slice, csf_masks[i], slice_spacing
-                                        )
-                                        asi_csf_masks.append(processed_csf)
-                                
-                                if csf_masks:
-                                    asi_result = self.asi_calculator.process_multi_slice(
-                                        asi_slices, asi_roi_masks, asi_csf_masks
-                                    )
-                                else:
-                                    asi_result = self._calculate_asi_without_csf(asi_slices, asi_roi_masks)
-                                
-                                result.update({f'asi_{k}': v for k, v in asi_result.items()})
-                                self.log_message(f"ASI = {asi_result.get('asi', 'N/A'):.2f}")
-                            except Exception as e:
-                                self.log_message(f"❌ ASI计算失败: {str(e)}")
-                                result['asi_error'] = str(e)
+                        processed_image_slices_for_si = None
+                        processed_mask_slices_for_si = None
 
-                        if self.enable_other_t2si.get():
-                            try:
-                                self.log_message("计算T2信号强度...")
-                                t2si_slices = []
-                                t2si_roi_masks = []
-                                t2si_csf_masks = []
+                        if self.enable_other_asi.get() or self.enable_other_t2si.get():
+
+                            processed_image_slices_for_si = []
+                            processed_mask_slices_for_si = []
+                            
+                            for i, img_slice in enumerate(image_slices):
+                                slice_spacing = spacing[:2] + [1.0]
                                 
-                                for i, (img_slice, roi_mask) in enumerate(zip(image_slices, roi_masks)):
-                                    slice_spacing = spacing[:2] + [1.0]
-                                    processed_img, processed_mask = self.preprocessor.preprocess_for_signal_intensity(
-                                        img_slice, roi_mask, slice_spacing
-                                    )
-                                    t2si_slices.append(processed_img)
-                                    t2si_roi_masks.append(processed_mask)
+                                processed_img, processed_mask = self.preprocessor.preprocess_for_signal_intensity(
+                                    img_slice, mask_slices[i], slice_spacing
+                                )
+                                unique_labels = np.unique(processed_mask)
+
+
+                                processed_image_slices_for_si.append(processed_img)
+                                processed_mask_slices_for_si.append(processed_mask.astype(np.int32))
+
+
+                        if self.enable_other_asi.get() and processed_image_slices_for_si:
+                            self.log_message("计算ASI...")
+                            for level_name, labels in self.config.DISC_LABELS.items():
+                                disc_masks_level = [(p_mask.astype(np.int32) == int(labels['disc'])).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
+                                
+                                if not any(np.any(mask) for mask in disc_masks_level):
+                                    continue
                                     
-                                    if csf_masks:
-                                        _, processed_csf = self.preprocessor.preprocess_for_signal_intensity(
-                                            img_slice, csf_masks[i], slice_spacing
-                                        )
-                                        t2si_csf_masks.append(processed_csf)
+                                csf_label = self.csf_label.get()
+                                csf_label_int = int(csf_label)
+                                csf_masks_level = [(p_mask.astype(np.int32) == csf_label_int).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
                                 
-                                if csf_masks:
-                                    t2si_result = self.t2si_calculator.process_multi_slice(
-                                        t2si_slices, t2si_roi_masks, t2si_csf_masks
+                                try:
+                                    self.log_message(f"  -> 处理 {level_name} ASI...")
+                                    asi_result = self.asi_calculator.process_multi_slice(
+                                        processed_image_slices_for_si, disc_masks_level, csf_masks_level
                                     )
-                                else:
-                                    t2si_result = self._calculate_t2si_global(t2si_slices, t2si_roi_masks)
+                                    result.update({f'asi_{level_name}_{k}': v for k, v in asi_result.items()})
+                                    self.log_message(f"  -> {level_name} ASI = {asi_result.get('asi', 'N/A'):3f}")
+                                except Exception as e:
+                                    self.log_message(f"❌ {level_name} ASI计算失败: {str(e)}")
+                                    result[f'asi_{level_name}_error'] = str(e)
+
+                        if self.enable_other_t2si.get() and processed_image_slices_for_si:
+                            self.log_message("计算T2信号强度...")
+                            for level_name, labels in self.config.DISC_LABELS.items():
+                                disc_masks_level = [(p_mask.astype(np.int32) == int(labels['disc'])).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
                                 
-                                serializable_t2si_result = {k: v for k, v in t2si_result.items() if k != 'slice_results'}
-                                result.update({f't2si_{k}': v for k, v in serializable_t2si_result.items()})
-                                self.log_message(f"T2SI比率 = {t2si_result.get('si_ratio', 'N/A'):.3f}")
-                            except Exception as e:
-                                self.log_message(f"❌ T2SI计算失败: {str(e)}")
-                                result['t2si_error'] = str(e)
+                                if not any(np.any(mask) for mask in disc_masks_level):
+                                    continue
+                                    
+                                csf_label = self.csf_label.get()
+                                csf_label_int = int(csf_label)
+                                csf_masks_level = [(p_mask.astype(np.int32) == csf_label_int).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
+                                
+                                if level_name in self.config.NP_LABELS:
+                                    np_label = self.config.NP_LABELS[level_name]['np']
+                                    np_masks_level = [(p_mask == np_label).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
+                                    
+                                    if not any(np.any(mask) for mask in np_masks_level):
+                                        self.log_message(f"  ⚠️ 在 {level_name} 未找到髓核标注（标签{np_label}），使用椎间盘掩码")
+                                        np_masks_level = disc_masks_level
+                                else:
+                                    np_masks_level = disc_masks_level
+                                
+                                try:
+                                    self.log_message(f"  -> 处理 {level_name} T2SI...")
+                                    t2si_result = self.t2si_calculator.process_multi_slice(
+                                        processed_image_slices_for_si, 
+                                        np_masks_level,
+                                        csf_masks_level
+                                    )
+                                    serializable_t2si_result = {k: v for k, v in t2si_result.items() if k != 'slice_results'}
+                                    result.update({f't2si_{level_name}_{k}': v for k, v in serializable_t2si_result.items()})
+                                    self.log_message(f"  -> {level_name} T2SI比率 = {t2si_result.get('si_ratio', 'N/A'):.3f}")
+                                except Exception as e:
+                                    self.log_message(f"❌ {level_name} T2SI计算失败: {str(e)}")
+                                    result[f't2si_{level_name}_error'] = str(e)
                         
                         if self.enable_other_fd.get():
                             try:
                                 self.log_message("计算分形维度...")
-                                fd_slices = []
-                                fd_masks = []
-                                
-                                for img_slice, roi_mask in zip(image_slices, roi_masks):
-                                    slice_spacing = spacing[:2] + [1.0]
-                                    edges, processed_mask = self.preprocessor.preprocess_for_fractal(
-                                        img_slice, roi_mask, slice_spacing
+                                for level_name, labels in self.config.DISC_LABELS.items():
+                                    self.log_message(f"  -> 处理 {level_name} FD...")
+
+                                    disc_masks_level = []
+                                    for mask_slice in mask_slices:
+                                        disc_mask = (mask_slice == labels['disc']).astype(np.uint8)
+                                        disc_masks_level.append(disc_mask)
+                                    
+                                    if not any(np.any(mask) for mask in disc_masks_level):
+                                        self.log_message(f"  -> 在 {level_name} 未找到掩码，跳过")
+                                        continue
+
+                                    fd_slices = []
+                                    fd_masks = []
+                                    
+                                    for i, img_slice in enumerate(image_slices):
+                                        slice_spacing = spacing[:2] + [1.0]
+                                        edges, processed_mask = self.preprocessor.preprocess_for_fractal(
+                                            img_slice, disc_masks_level[i], slice_spacing
+                                        )
+                                        fd_slices.append(edges)
+                                        fd_masks.append(processed_mask)
+                                    
+                                    fd_result = self.fd_calculator.process_multi_slice(
+                                        fd_slices, fd_masks
                                     )
-                                    fd_slices.append(edges)
-                                    fd_masks.append(processed_mask)
-                                
-                                fd_result = self.fd_calculator.process_multi_slice(
-                                    fd_slices, fd_masks
-                                )
-                                result.update({f'fd_{k}': v for k, v in fd_result.items()})
-                                self.log_message(f"FD = {fd_result.get('fd', 'N/A'):.3f}")
+                                    result.update({f'fd_{level_name}_{k}': v for k, v in fd_result.items()})
+                                    self.log_message(f"  -> {level_name} FD = {fd_result.get('fd', 'N/A'):.3f}")
+
                             except Exception as e:
                                 self.log_message(f"❌ FD计算失败: {str(e)}")
                                 result['fd_error'] = str(e)
@@ -1981,29 +2073,45 @@ class IntegratedFeatureExtractorGUI:
                         if self.enable_other_gabor.get():
                             try:
                                 self.log_message("计算Gabor特征...")
-                                gabor_slices = []
-                                gabor_masks = []
-                                
-                                for img_slice, roi_mask in zip(image_slices, roi_masks):
-                                    slice_spacing = spacing[:2] + [1.0]
-                                    processed_img, processed_mask = self.preprocessor.preprocess_for_texture(
-                                        img_slice, roi_mask, slice_spacing
-                                    )
-                                    gabor_slices.append(processed_img)
-                                    gabor_masks.append(processed_mask)
+                                for level_name, labels in self.config.DISC_LABELS.items():
+                                    self.log_message(f"  -> 处理 {level_name} Gabor...")
 
-                                gabor_features = {}
-                                for i, (img, mask) in enumerate(zip(gabor_slices, gabor_masks)):
-                                    slice_features = self.gabor_calculator.calculate(img, mask)
-                                    for k, v in slice_features.items():
-                                        if k in gabor_features:
-                                            gabor_features[k].append(v)
-                                        else:
-                                            gabor_features[k] = [v]
+                                    disc_masks_level = []
+                                    for mask_slice in mask_slices:
+                                        disc_mask = (mask_slice == labels['disc']).astype(np.uint8)
+                                        disc_masks_level.append(disc_mask)
 
-                                gabor_result = {k: np.mean(v) for k, v in gabor_features.items()}
-                                result.update({f'gabor_{k}': v for k, v in gabor_result.items()})
-                                self.log_message(f"提取了 {len(gabor_result)} 个Gabor特征")
+                                    if not any(np.any(mask) for mask in disc_masks_level):
+                                        self.log_message(f"  -> 在 {level_name} 未找到掩码，跳过")
+                                        continue
+
+                                    gabor_slices_level = []
+                                    gabor_masks_level = []
+
+                                    for i, img_slice in enumerate(image_slices):
+                                        slice_spacing = spacing[:2] + [1.0]
+                                        processed_img, processed_mask = self.preprocessor.preprocess_for_texture(
+                                            img_slice, disc_masks_level[i], slice_spacing
+                                        )
+                                        gabor_slices_level.append(processed_img)
+                                        gabor_masks_level.append(processed_mask)
+
+                                    gabor_features = {}
+                                    for i, (img, mask) in enumerate(zip(gabor_slices_level, gabor_masks_level)):
+                                        if not np.any(mask): continue 
+                                        slice_features = self.gabor_calculator.calculate(img, mask)
+                                        for k, v in slice_features.items():
+                                            if k in gabor_features:
+                                                gabor_features[k].append(v)
+                                            else:
+                                                gabor_features[k] = [v]
+
+                                    if not gabor_features: continue
+
+                                    gabor_result = {k: np.mean(v) for k, v in gabor_features.items()}
+                                    result.update({f'gabor_{level_name}_{k}': v for k, v in gabor_result.items()})
+                                    self.log_message(f"  -> {level_name} 提取了 {len(gabor_result)} 个Gabor特征")
+
                             except Exception as e:
                                 self.log_message(f"❌ Gabor计算失败: {str(e)}")
                                 result['gabor_error'] = str(e)
@@ -2011,60 +2119,140 @@ class IntegratedFeatureExtractorGUI:
                         if self.enable_other_hu.get():
                             try:
                                 self.log_message("计算Hu不变矩...")
-                                hu_masks = []
-                                
-                                for roi_mask in roi_masks:
-                                    slice_spacing = spacing[:2] + [1.0]
-                                    binary_mask = self.preprocessor.preprocess_for_shape(
-                                        roi_mask, slice_spacing
-                                    )
-                                    hu_masks.append(binary_mask)
+                                for level_name, labels in self.config.DISC_LABELS.items():
+                                    self.log_message(f"  -> 处理 {level_name} Hu矩...")
 
-                                hu_features = {}
-                                for i, mask in enumerate(hu_masks):
-                                    slice_features = self.hu_calculator.calculate(mask, mask)
-                                    for k, v in slice_features.items():
-                                        if k in hu_features:
-                                            hu_features[k].append(v)
-                                        else:
-                                            hu_features[k] = [v]
+                                    disc_masks_level = []
+                                    for mask_slice in mask_slices:
+                                        disc_mask = (mask_slice == labels['disc']).astype(np.uint8)
+                                        disc_masks_level.append(disc_mask)
 
-                                hu_result = {k: np.mean(v) for k, v in hu_features.items()}
-                                result.update({f'hu_{k}': v for k, v in hu_result.items()})
-                                self.log_message(f"提取了 {len(hu_result)} 个Hu矩特征")
+                                    if not any(np.any(mask) for mask in disc_masks_level):
+                                        self.log_message(f"  -> 在 {level_name} 未找到掩码，跳过")
+                                        continue
+
+                                    hu_masks_level = []
+                                    for roi_mask in disc_masks_level:
+                                        slice_spacing = spacing[:2] + [1.0]
+                                        binary_mask = self.preprocessor.preprocess_for_shape(
+                                            roi_mask, slice_spacing
+                                        )
+                                        hu_masks_level.append(binary_mask)
+
+                                    hu_features = {}
+                                    for i, mask in enumerate(hu_masks_level):
+                                        if not np.any(mask): continue
+                                        slice_features = self.hu_calculator.calculate(mask, mask)
+                                        for k, v in slice_features.items():
+                                            if k in hu_features:
+                                                hu_features[k].append(v)
+                                            else:
+                                                hu_features[k] = [v]
+                                    
+                                    if not hu_features: continue
+
+                                    hu_result = {k: np.mean(v) for k, v in hu_features.items()}
+                                    result.update({f'hu_{level_name}_{k}': v for k, v in hu_result.items()})
+                                    self.log_message(f"  -> {level_name} 提取了 {len(hu_result)} 个Hu矩特征")
+
                             except Exception as e:
                                 self.log_message(f"❌ Hu矩计算失败: {str(e)}")
                                 result['hu_error'] = str(e)
 
+
                         if self.enable_other_texture.get():
                             try:
-                                self.log_message("计算扩展纹理特征...")
-                                texture_slices = []
-                                texture_masks = []
-                                
-                                for img_slice, roi_mask in zip(image_slices, roi_masks):
-                                    slice_spacing = spacing[:2] + [1.0]
-                                    processed_img, processed_mask = self.preprocessor.preprocess_for_texture(
-                                        img_slice, roi_mask, slice_spacing
-                                    )
-                                    texture_slices.append(processed_img)
-                                    texture_masks.append(processed_mask)
+                                self.log_message("计算扩展纹理特征 (按椎间盘级别)...")
+                                for level_name, labels in self.config.DISC_LABELS.items():
+                                    self.log_message(f"  -> 处理 {level_name} 扩展纹理...")
 
-                                texture_features = {}
-                                for i, (img, mask) in enumerate(zip(texture_slices, texture_masks)):
-                                    slice_features = self.texture_calculator.calculate(img, mask)
-                                    for k, v in slice_features.items():
-                                        if k in texture_features:
-                                            texture_features[k].append(v)
-                                        else:
-                                            texture_features[k] = [v]
+                                    disc_masks_level = []
+                                    for mask_slice in mask_slices:
+                                        disc_mask = (mask_slice == labels['disc']).astype(np.uint8)
+                                        disc_masks_level.append(disc_mask)
 
-                                texture_result = {k: np.mean(v) for k, v in texture_features.items()}
-                                result.update({f'texture_{k}': v for k, v in texture_result.items()})
-                                self.log_message(f"提取了 {len(texture_result)} 个纹理特征")
+                                    if not any(np.any(mask) for mask in disc_masks_level):
+                                        self.log_message(f"  -> 在 {level_name} 未找到掩码，跳过")
+                                        continue
+
+                                    texture_slices_level = []
+                                    texture_masks_level = []
+                                    for i, img_slice in enumerate(image_slices):
+                                        slice_spacing = spacing[:2] + [1.0]
+                                        processed_img, processed_mask = self.preprocessor.preprocess_for_texture(
+                                            img_slice, disc_masks_level[i], slice_spacing
+                                        )
+                                        texture_slices_level.append(processed_img)
+                                        texture_masks_level.append(processed_mask)
+
+                                    texture_features = {}
+                                    for i, (img, mask) in enumerate(zip(texture_slices_level, texture_masks_level)):
+                                        if not np.any(mask): continue
+                                        slice_features = self.texture_calculator.calculate(img, mask)
+                                        for k, v in slice_features.items():
+                                            if k in texture_features:
+                                                texture_features[k].append(v)
+                                            else:
+                                                texture_features[k] = [v]
+                                    
+                                    if not texture_features: continue
+
+                                    texture_result = {k: np.mean(v) for k, v in texture_features.items()}
+                                    result.update({f'texture_{level_name}_{k}': v for k, v in texture_result.items()})
+                                    self.log_message(f"  -> {level_name} 提取了 {len(texture_result)} 个扩展纹理特征")
+
                             except Exception as e:
-                                self.log_message(f"❌ 纹理特征计算失败: {str(e)}")
+                                self.log_message(f"❌ 扩展纹理特征计算失败: {str(e)}")
                                 result['texture_error'] = str(e)
+
+                        if self.enable_other_dscr.get():
+                            try:
+                                self.log_message("计算椎管狭窄率DSCR...")
+                                
+                                dural_sac_masks = []
+                                landmark_masks = []
+                                
+                                for mask_slice in mask_slices:
+                                    dural_sac_mask = (mask_slice == self.dural_sac_label.get()).astype(np.uint8)
+                                    dural_sac_masks.append(dural_sac_mask)
+                                    
+                                    landmark_mask = np.zeros_like(mask_slice, dtype=np.uint8)
+                                    if hasattr(self.config, 'LANDMARK_LABELS'):
+                                        for landmark_name, landmark_label in self.config.LANDMARK_LABELS.items():
+                                            landmark_mask |= (mask_slice == landmark_label).astype(np.uint8)
+                                    else:
+                                        for label_value in [31, 32, 33, 34, 35, 36]:
+                                            landmark_mask |= (mask_slice == label_value).astype(np.uint8)
+                                    
+                                    landmark_masks.append(landmark_mask)
+                                
+                                if not any(np.any(mask) for mask in dural_sac_masks):
+                                    self.log_message("⚠️ 没有找到硬脊膜囊区域")
+                                    result['dscr_note'] = "需要硬脊膜囊标注"
+                                elif not any(np.any(mask) for mask in landmark_masks):
+                                    self.log_message("⚠️ 没有找到地标点")
+                                    result['dscr_note'] = "需要椎体地标点标注"
+                                else:
+                                    for level_name in self.config.DISC_LABELS.keys():
+                                        disc_masks_for_dscr = []
+                                        for mask_slice in mask_slices:
+                                            disc_mask = (mask_slice == self.config.DISC_LABELS[level_name]['disc']).astype(np.uint8)
+                                            disc_masks_for_dscr.append(disc_mask)
+                                        
+                                        if any(np.any(mask) for mask in disc_masks_for_dscr):
+                                            dscr_result = self.dscr_calculator.process_multi_slice(
+                                                disc_masks_for_dscr, dural_sac_masks, landmark_masks, level_name
+                                            )
+                                            
+                                            for key, value in dscr_result.items():
+                                                result[f'dscr_{level_name}_{key}'] = value
+                                            
+                                            self.log_message(f"{level_name} DSCR = {dscr_result.get('dscr', 'N/A'):.1f}%")
+                                    
+                            except Exception as e:
+                                self.log_message(f"❌ DSCR计算失败: {str(e)}")
+                                result['dscr_error'] = str(e)
+
                         
                         result['status'] = 'success'
                         batch_results.append(result)
