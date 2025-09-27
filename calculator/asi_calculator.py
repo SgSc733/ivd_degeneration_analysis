@@ -30,7 +30,7 @@ class ASICalculator(BaseCalculator):
         try:
             disc_intensities = self._extract_signal_intensities(disc_image, disc_mask)
             
-            if len(disc_intensities) < 100: 
+            if len(disc_intensities) < 30: 
                 raise ValueError("椎间盘区域像素太少，无法进行可靠的GMM拟合")
             
             gmm, gmm_data = self._fit_gaussian_mixture(disc_intensities)
@@ -91,7 +91,6 @@ class ASICalculator(BaseCalculator):
         return gmm, gmm_data
     
     def _calculate_peak_difference(self, gmm: GaussianMixture) -> float:
-        """修复的峰值差异计算，增强了对GMM拟合结果的鲁棒性"""
         
         means = gmm.means_.flatten()
         
