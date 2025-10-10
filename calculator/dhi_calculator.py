@@ -167,7 +167,7 @@ class DHICalculator(BaseCalculator):
         return self._sort_corners_robust(corners)
     
     def _fallback_corner_detection(self, mask: np.ndarray) -> np.ndarray:
-        """备用角点检测方法"""
+
         rows = np.any(mask, axis=1)
         cols = np.any(mask, axis=0)
         rmin, rmax = np.where(rows)[0][[0, -1]]
