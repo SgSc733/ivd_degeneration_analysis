@@ -68,7 +68,7 @@ LANG_DICT = {
         'enable_dscr': '椎管狭窄率 (DSCR)',
         'dural_sac_label': '硬脊膜囊标签值:',
         'other_feature_settings': '其他特征设置',
-        'csf_label': 'CSF标签值:',
+        'dural_sac_label': '椎管/CSF标签值:',
         'processing_other': '🔄 处理其他特征...',
         'other_complete': '✅ 其他特征提取完成',
         'feature_type': '特征类型:',
@@ -300,7 +300,6 @@ class IntegratedFeatureExtractorGUI:
         self.enable_other_dscr = tk.BooleanVar(value=True) 
         self.dural_sac_label = tk.IntVar(value=20)
 
-        self.csf_label = tk.IntVar(value=1)
 
         self._init_pyradiomics_variables()
 
@@ -451,7 +450,7 @@ class IntegratedFeatureExtractorGUI:
             if 'other_param_group' in self.widgets:
                 self.widgets['other_param_group'].config(text=self.get_text('other_feature_settings'))
             if 'csf_label_label' in self.widgets:
-                self.widgets['csf_label_label'].config(text=self.get_text('csf_label'))
+                self.widgets['csf_label_label'].config(text=self.get_text('dural_sac_label'))
 
             if 'basic_group' in self.widgets:
                 self.widgets['basic_group'].config(text=self.get_text('parameter_settings'))
@@ -1488,7 +1487,7 @@ class IntegratedFeatureExtractorGUI:
 
                 csf_masks = []
                 if self.enable_other_asi.get() or self.enable_other_t2si.get():
-                    csf_label = self.csf_label.get()
+                    csf_label = self.dural_sac_label.get()
                     for mask_slice in mask_slices:
                         csf_mask = (mask_slice == csf_label).astype(np.uint8)
                         csf_masks.append(csf_mask)
@@ -1573,7 +1572,7 @@ class IntegratedFeatureExtractorGUI:
                         if not any(np.any(mask) for mask in disc_masks_level):
                             continue
                             
-                        csf_label = self.csf_label.get()
+                        csf_label = self.dural_sac_label.get()
                         csf_label_int = int(csf_label)
                         csf_masks_level = [(p_mask.astype(np.int32) == csf_label_int).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
                         
@@ -1596,25 +1595,15 @@ class IntegratedFeatureExtractorGUI:
                         if not any(np.any(mask) for mask in disc_masks_level):
                             continue
                             
-                        csf_label = self.csf_label.get()
+                        csf_label = self.dural_sac_label.get()
                         csf_label_int = int(csf_label)
                         csf_masks_level = [(p_mask.astype(np.int32) == csf_label_int).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
-                        
-                        if level_name in self.config.NP_LABELS:
-                            np_label = self.config.NP_LABELS[level_name]['np']
-                            np_masks_level = [(p_mask == np_label).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
-                            
-                            if not any(np.any(mask) for mask in np_masks_level):
-                                self.log_message(f"  ⚠️ 在 {level_name} 未找到髓核标注（标签{np_label}），使用椎间盘掩码")
-                                np_masks_level = disc_masks_level
-                        else:
-                            np_masks_level = disc_masks_level
                         
                         try:
                             self.log_message(f"  -> 处理 {level_name} T2SI...")
                             t2si_result = self.t2si_calculator.process_multi_slice(
                                 processed_image_slices_for_si, 
-                                np_masks_level,
+                                disc_masks_level,
                                 csf_masks_level
                             )
                             serializable_t2si_result = {k: v for k, v in t2si_result.items() if k != 'slice_results'}
@@ -1898,7 +1887,7 @@ class IntegratedFeatureExtractorGUI:
 
                         csf_masks = []
                         if self.enable_other_asi.get() or self.enable_other_t2si.get():
-                            csf_label = self.csf_label.get()
+                            csf_label = self.dural_sac_label.get()
                             for mask_slice in mask_slices:
                                 csf_mask = (mask_slice == csf_label).astype(np.uint8)
                                 csf_masks.append(csf_mask)
@@ -1983,7 +1972,7 @@ class IntegratedFeatureExtractorGUI:
                                 if not any(np.any(mask) for mask in disc_masks_level):
                                     continue
                                     
-                                csf_label = self.csf_label.get()
+                                csf_label = self.dural_sac_label.get()
                                 csf_label_int = int(csf_label)
                                 csf_masks_level = [(p_mask.astype(np.int32) == csf_label_int).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
                                 
@@ -2006,19 +1995,9 @@ class IntegratedFeatureExtractorGUI:
                                 if not any(np.any(mask) for mask in disc_masks_level):
                                     continue
                                     
-                                csf_label = self.csf_label.get()
+                                csf_label = self.dural_sac_label.get()
                                 csf_label_int = int(csf_label)
                                 csf_masks_level = [(p_mask.astype(np.int32) == csf_label_int).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
-                                
-                                if level_name in self.config.NP_LABELS:
-                                    np_label = self.config.NP_LABELS[level_name]['np']
-                                    np_masks_level = [(p_mask == np_label).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
-                                    
-                                    if not any(np.any(mask) for mask in np_masks_level):
-                                        self.log_message(f"  ⚠️ 在 {level_name} 未找到髓核标注（标签{np_label}），使用椎间盘掩码")
-                                        np_masks_level = disc_masks_level
-                                else:
-                                    np_masks_level = disc_masks_level
                                 
                                 try:
                                     self.log_message(f"  -> 处理 {level_name} T2SI...")
@@ -2027,6 +2006,7 @@ class IntegratedFeatureExtractorGUI:
                                         np_masks_level,
                                         csf_masks_level
                                     )
+
                                     serializable_t2si_result = {k: v for k, v in t2si_result.items() if k != 'slice_results'}
                                     result.update({f't2si_{level_name}_{k}': v for k, v in serializable_t2si_result.items()})
                                     self.log_message(f"  -> {level_name} T2SI比率 = {t2si_result.get('si_ratio', 'N/A'):.3f}")
@@ -2363,7 +2343,7 @@ class IntegratedFeatureExtractorGUI:
                 other_results.append(pyrad_result)
 
     def _convert_to_long_format(self, wide_df: pd.DataFrame) -> pd.DataFrame:
-        """将宽格式数据转换为长格式"""
+
         long_results = []
         
         for _, row in wide_df.iterrows():
