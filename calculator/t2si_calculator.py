@@ -28,7 +28,7 @@ class T2SignalIntensityCalculator(BaseCalculator):
     
     @monitor_memory(threshold_percent=80)
     def calculate(self, image: np.ndarray, disc_mask: np.ndarray, 
-                  csf_mask: np.ndarray, vertebra_mask: Optional[np.ndarray] = None) -> Dict[str, Any]:
+                csf_mask: np.ndarray, vertebra_mask: Optional[np.ndarray] = None) -> Dict[str, Any]:
 
         self.validate_input(image, disc_mask)
         
@@ -168,6 +168,14 @@ class T2SignalIntensityCalculator(BaseCalculator):
         masked_pixels = image[mask > 0]
         if len(masked_pixels) == 0:
             return 0.0
+
+        if len(masked_pixels) > 20:
+            lower_bound = np.percentile(masked_pixels, 25)
+            pure_pixels = masked_pixels[masked_pixels > lower_bound]
+            
+            if len(pure_pixels) > 10:
+                return float(np.mean(pure_pixels))
+
         return float(np.mean(masked_pixels))
     
     def _calculate_roi_statistics(self, image: np.ndarray, roi_mask: np.ndarray) -> Dict[str, float]:
