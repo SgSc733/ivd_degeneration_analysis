@@ -115,14 +115,19 @@ class ASICalculator(BaseCalculator):
             self.logger.warning("CSF掩模中没有有效像素，使用全图95%分位数作为备用参考")
             valid_pixels = image[image > 0]
             if len(valid_pixels) > 0:
-                csf_mean = np.percentile(valid_pixels, 95)
+                return float(np.percentile(valid_pixels, 95))
             else:
                 self.logger.error("图像中没有有效像素，无法计算CSF参考值")
                 raise ValueError("图像中没有有效像素")
-        else:
-            csf_mean = np.median(csf_intensities)
         
-        return float(csf_mean)
+        if len(csf_intensities) > 20:
+            lower_bound = np.percentile(csf_intensities, 25)
+            pure_pixels = csf_intensities[csf_intensities > lower_bound]
+            
+            if len(pure_pixels) > 10:
+                return float(np.mean(pure_pixels))
+
+        return float(np.mean(csf_intensities))
     
     def _prepare_gmm_visualization_data(self, intensities: np.ndarray, 
                                       gmm: GaussianMixture) -> Dict:
