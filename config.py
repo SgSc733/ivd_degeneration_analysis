@@ -4,8 +4,6 @@ from typing import Dict, Any
 
 class Config:
 
-    DATA_DIR = Path("./data")
-    OUTPUT_DIR = Path("./output")
 
     DISC_LABELS = {
         'L1-L2': {'disc': 3, 'upper': 2, 'lower': 4},
@@ -14,18 +12,17 @@ class Config:
         'L4-L5': {'disc': 9, 'upper': 8, 'lower': 10},
         'L5-S1': {'disc': 11, 'upper': 10, 'lower': 12}
     }
-    
-    CSF_LABEL = 1
+
 
     DURAL_SAC_LABEL = 20  
     
     LANDMARK_LABELS = {    
-        'L1': 31,
-        'L2': 32,
-        'L3': 33,
-        'L4': 34,
-        'L5': 35,
-        'S1': 36
+        'L1': 21,
+        'L2': 22,
+        'L3': 23,
+        'L4': 24,
+        'L5': 25,
+        'S1': 26
     }
 
     DSCR_PARAMS = {
@@ -34,13 +31,6 @@ class Config:
         'min_landmarks': 3    
     }
 
-    NP_LABELS = {
-        'L1-L2': {'np': 13},
-        'L2-L3': {'np': 15},
-        'L3-L4': {'np': 17},
-        'L4-L5': {'np': 19},
-        'L5-S1': {'np': 21}
-    }
 
     DHI_PARAMS = {
         'central_ratio': 0.8,
