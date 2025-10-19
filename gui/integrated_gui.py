@@ -352,7 +352,7 @@ class IntegratedFeatureExtractorGUI:
         self.preCrop = tk.BooleanVar(value=False)
         self.voxel_array_shift = tk.IntVar(value=0)
         self.force2D = tk.BooleanVar(value=False)
-        self.force2D_dimension = tk.IntVar(value=0)
+        self.force2D_dimension = tk.IntVar(value=2)
         self.force2D_aggregator = tk.StringVar(value="mean")
         self.distances = tk.StringVar(value="1")
 
