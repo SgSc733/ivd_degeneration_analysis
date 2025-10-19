@@ -166,13 +166,8 @@ class ASICalculator(BaseCalculator):
             'peaks': gmm.means_.flatten()
         }
     
-    def process_multi_slice(self, image_slices: list, disc_masks: list,
-                        csf_masks: list, use_parallel: Optional[bool] = None) -> Dict[str, float]:
-        if use_parallel is None:
-            use_parallel = self.enable_parallel
-        
-        if use_parallel:
-            return self.process_multi_slice_parallel(image_slices, disc_masks, csf_masks)
+    def _process_multi_slice_serial(self, image_slices: list, disc_masks: list,
+                                    csf_masks: list) -> Dict[str, float]:
         
         if not (len(image_slices) == len(disc_masks) == len(csf_masks)):
             raise ValueError("切片列表长度不一致")
@@ -186,7 +181,7 @@ class ASICalculator(BaseCalculator):
                 asi_results.append(result)
                 valid_slices += 1
             except Exception as e:
-                print(f"切片{i}处理失败: {str(e)}")
+                self.logger.warning(f"切片{i}处理失败: {str(e)}")
                 continue
         
         if valid_slices == 0:
@@ -204,12 +199,24 @@ class ASICalculator(BaseCalculator):
         
         return avg_result
     
+
+    def process_multi_slice(self, image_slices: list, disc_masks: list,
+                        csf_masks: list, use_parallel: Optional[bool] = None) -> Dict[str, float]:
+        if use_parallel is None:
+            use_parallel = self.enable_parallel
+
+        if use_parallel and len(image_slices) >= 3:
+            return self.process_multi_slice_parallel(image_slices, disc_masks, csf_masks)
+
+        return self._process_multi_slice_serial(image_slices, disc_masks, csf_masks)
+    
+
     @monitor_memory(threshold_percent=70)
     def process_multi_slice_parallel(self, image_slices: list, disc_masks: list,
                                 csf_masks: list) -> Dict[str, float]:
 
         if not self.enable_parallel or len(image_slices) < 3:
-            return self.process_multi_slice(image_slices, disc_masks, csf_masks)
+            return self._process_multi_slice_serial(image_slices, disc_masks, csf_masks)
         
         def process_single_slice(args):
             i, img, disc_mask, csf_mask = args
@@ -222,8 +229,10 @@ class ASICalculator(BaseCalculator):
         args_list = [(i, img, disc_mask, csf_mask) 
                     for i, (img, disc_mask, csf_mask) 
                     in enumerate(zip(image_slices, disc_masks, csf_masks))]
+
+        num_workers = min(self.max_workers, len(args_list))
         
-        with ThreadPoolExecutor(max_workers=min(self.max_workers, len(args_list))) as executor:
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
             results = list(executor.map(process_single_slice, args_list))
         
         asi_results = []
