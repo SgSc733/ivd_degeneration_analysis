@@ -12,9 +12,9 @@ from utils.memory_monitor import monitor_memory
 class ASICalculator(BaseCalculator):
 
     def __init__(self, n_components: int = 2, scale_factor: float = 255.0,
-                enable_parallel: bool = True, max_workers: Optional[int] = None):
+                enable_parallel: bool = True, max_workers: Optional[int] = None, **kwargs):
 
-        super().__init__("ASI Calculator", enable_parallel=enable_parallel)
+        super().__init__("ASI Calculator", enable_parallel=enable_parallel, **kwargs)
         self.n_components = n_components
         self.scale_factor = scale_factor
         if max_workers is not None:
