@@ -9,11 +9,21 @@ import logging
 
 class BaseCalculator(ABC):
     
-    def __init__(self, name: str, enable_parallel: bool = True):
+    def __init__(self, name: str, enable_parallel: bool = True, logger_callback=None, debug_mode: bool = False):
         self.name = name
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.debug_mode = debug_mode
+        if logger_callback:
+            self.logger = GuiLoggerProxy(logger_callback, debug_mode=self.debug_mode)
+        else:
+            self.logger = logging.getLogger(self.__class__.__name__)
         self.enable_parallel = enable_parallel
         self.max_workers = mp.cpu_count() // 2
+
+    def set_debug_mode(self, enabled: bool):
+
+        self.debug_mode = enabled
+        if isinstance(self.logger, GuiLoggerProxy):
+            self.logger.set_debug_mode(enabled)
     
     @abstractmethod
     def calculate(self, *args, **kwargs) -> Dict[str, Any]:
@@ -34,3 +44,30 @@ class BaseCalculator(ABC):
             
         if not np.any(mask):
             raise ValueError("掩模中没有有效像素")
+
+
+class GuiLoggerProxy:
+
+    def __init__(self, callback, debug_mode: bool = False):
+        self.callback = callback
+        self.debug_enabled = debug_mode
+
+    def set_debug_mode(self, enabled: bool):
+
+        self.debug_enabled = enabled
+        status = "开启" if enabled else "关闭"
+        self.info(f"调试信息显示已{status}。")
+
+    def info(self, msg):
+        if self.debug_enabled:
+            self.callback(f"[INFO] {msg}")
+
+    def warning(self, msg):
+        self.callback(f"[WARNING] {msg}")
+
+    def error(self, msg):
+        self.callback(f"[ERROR] {msg}")
+
+    def debug(self, msg):
+        if self.debug_enabled:
+            self.callback(f"[DEBUG] {msg}")
