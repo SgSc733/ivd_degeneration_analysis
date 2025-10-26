@@ -11,16 +11,8 @@ class Config:
 
 
     DURAL_SAC_LABEL = 20  
-    
-    LANDMARK_LABELS = {    
-        'L1': 21,
-        'L2': 22,
-        'L3': 23,
-        'L4': 24,
-        'L5': 25,
-        'S1': 26
-    }
 
+    
     DSCR_PARAMS = {
         'spline_smoothing': 0, 
         'spline_degree': 2,     
@@ -140,3 +132,4 @@ class Config:
         'hu': {'enabled': False},   
         'texture': {'enabled': True, 'max_workers': 4}
     }
+
