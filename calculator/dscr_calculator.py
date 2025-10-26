@@ -95,7 +95,7 @@ class DSCRCalculator(BaseCalculator):
         return corners
 
     def _find_vertebra_corners(self, vertebra_mask: np.ndarray) -> Optional[np.ndarray]:
-        """使用 cv2.goodFeaturesToTrack 检测椎体的四个角点。"""
+
         if not np.any(vertebra_mask):
             return None
             
@@ -270,9 +270,7 @@ class DSCRCalculator(BaseCalculator):
     
 
     def _fit_ideal_curve(self, landmarks_yx: np.ndarray) -> Optional[Tuple]:
-        """
-        landmarks_yx: (N, 2) array, with columns [y, x]
-        """
+
         if len(landmarks_yx) < self.min_landmarks:
             return None
 
