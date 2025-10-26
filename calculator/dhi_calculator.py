@@ -13,9 +13,9 @@ class DHICalculator(BaseCalculator):
                 calculate_dwr: bool = True,
                 consider_bulging: bool = True,
                 enable_parallel: bool = False, 
-                max_workers: Optional[int] = None):
+                max_workers: Optional[int] = None, **kwargs):
 
-        super().__init__("DHI Calculator", enable_parallel=enable_parallel)
+        super().__init__("DHI Calculator", enable_parallel=enable_parallel, **kwargs)
         self.central_ratio = central_ratio
         self.calculate_dwr = calculate_dwr
         self.consider_bulging = consider_bulging
