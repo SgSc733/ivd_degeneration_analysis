@@ -17,9 +17,9 @@ class GaborCalculator(BaseCalculator):
                 gamma: float = 0.5,
                 psi: float = 0,
                 enable_parallel: bool = True,  
-                max_workers: Optional[int] = None):
+                max_workers: Optional[int] = None, **kwargs):
 
-        super().__init__("Gabor Calculator", enable_parallel=enable_parallel)
+        super().__init__("Gabor Calculator", enable_parallel=enable_parallel, **kwargs)
         
         self.wavelengths = wavelengths or [2, 4, 6, 8, 10]
         self.orientations = orientations or np.linspace(0, np.pi, 8, endpoint=False)
