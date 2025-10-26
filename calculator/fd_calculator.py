@@ -16,9 +16,9 @@ class FractalDimensionCalculator(BaseCalculator):
                 min_box_size: int = 1,
                 max_box_size: Optional[int] = None,
                 enable_parallel: bool = False, 
-                max_workers: Optional[int] = None):
+                max_workers: Optional[int] = None, **kwargs):
 
-        super().__init__("FD Calculator", enable_parallel=enable_parallel)
+        super().__init__("FD Calculator", enable_parallel=enable_parallel, **kwargs)
         self.threshold_percent = threshold_percent
         self.min_box_size = min_box_size
         self.max_box_size = max_box_size
