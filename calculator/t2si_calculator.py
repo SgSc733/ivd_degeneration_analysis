@@ -14,9 +14,9 @@ class T2SignalIntensityCalculator(BaseCalculator):
                 brightness_percentile: int = 75,
                 min_roi_size: int = 20,
                 enable_parallel: bool = True,
-                max_workers: Optional[int] = None):
+                max_workers: Optional[int] = None, **kwargs):
 
-        super().__init__(name='T2SignalIntensity', enable_parallel=enable_parallel)
+        super().__init__(name='T2SignalIntensity', enable_parallel=enable_parallel, **kwargs)
         self.roi_method = roi_method.upper()
         self.brightness_percentile = brightness_percentile
         self.min_roi_size = min_roi_size
