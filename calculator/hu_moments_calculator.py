@@ -7,8 +7,8 @@ from utils.memory_monitor import monitor_memory
 
 class HuMomentsCalculator(BaseCalculator):
     
-    def __init__(self):
-        super().__init__("Hu Moments Calculator")
+    def __init__(self, **kwargs):
+        super().__init__("Hu Moments Calculator", **kwargs)
 
     @monitor_memory(threshold_percent=90)    
     def calculate(self, image: np.ndarray, mask: np.ndarray) -> Dict[str, float]:
