@@ -204,14 +204,18 @@ class IntegratedFeatureExtractorGUI:
         self.image_io = ImageIO()
         self.preprocessor = Preprocessor()
         
-        self.dhi_calculator = DHICalculator(**self.config.DHI_PARAMS)
-        self.asi_calculator = ASICalculator(**self.config.ASI_PARAMS)
-        self.fd_calculator = FractalDimensionCalculator(**self.config.FD_PARAMS)
-        self.t2si_calculator = T2SignalIntensityCalculator(**self.config.T2SI_PARAMS)
-        self.gabor_calculator = GaborCalculator(**self.config.GABOR_PARAMS)
-        self.hu_calculator = HuMomentsCalculator(**self.config.HU_MOMENTS_PARAMS)
-        self.texture_calculator = TextureFeaturesCalculator(**self.config.TEXTURE_PARAMS)
-        self.dscr_calculator = DSCRCalculator(**self.config.DSCR_PARAMS)
+        logger_cb = self.log_message
+
+        self.show_debug_info = tk.BooleanVar(value=False)
+
+        self.dhi_calculator = DHICalculator(**self.config.DHI_PARAMS, logger_callback=logger_cb, debug_mode=self.show_debug_info.get())
+        self.asi_calculator = ASICalculator(**self.config.ASI_PARAMS, logger_callback=logger_cb, debug_mode=self.show_debug_info.get())
+        self.fd_calculator = FractalDimensionCalculator(**self.config.FD_PARAMS, logger_callback=logger_cb, debug_mode=self.show_debug_info.get())
+        self.t2si_calculator = T2SignalIntensityCalculator(**self.config.T2SI_PARAMS, logger_callback=logger_cb, debug_mode=self.show_debug_info.get())
+        self.gabor_calculator = GaborCalculator(**self.config.GABOR_PARAMS, logger_callback=logger_cb, debug_mode=self.show_debug_info.get())
+        self.hu_calculator = HuMomentsCalculator(**self.config.HU_MOMENTS_PARAMS, logger_callback=logger_cb, debug_mode=self.show_debug_info.get())
+        self.texture_calculator = TextureFeaturesCalculator(**self.config.TEXTURE_PARAMS, logger_callback=logger_cb, debug_mode=self.show_debug_info.get())
+        self.dscr_calculator = DSCRCalculator(**self.config.DSCR_PARAMS, logger_callback=logger_cb, debug_mode=self.show_debug_info.get())
 
         import queue
         import threading
@@ -1740,7 +1744,7 @@ class IntegratedFeatureExtractorGUI:
 
                 if self.enable_other_texture.get():
                     try:
-                        self.log_message("计算扩展纹理特征 (按椎间盘级别)...")
+                        self.log_message("计算扩展纹理特征...")
                         for level_name, labels in self.config.DISC_LABELS.items():
                             self.log_message(f"  -> 处理 {level_name} 扩展纹理...")
 
@@ -1788,45 +1792,26 @@ class IntegratedFeatureExtractorGUI:
                     try:
                         self.log_message("计算椎管狭窄率DSCR...")
                         
-                        dural_sac_masks = []
-                        landmark_masks = []
-                        
-                        for mask_slice in mask_slices:
-                            dural_sac_mask = (mask_slice == self.dural_sac_label.get()).astype(np.uint8)
-                            dural_sac_masks.append(dural_sac_mask)
-                            
-                            landmark_mask = np.zeros_like(mask_slice, dtype=np.uint8)
-                            if hasattr(self.config, 'LANDMARK_LABELS'):
-                                for landmark_name, landmark_label in self.config.LANDMARK_LABELS.items():
-                                    landmark_mask |= (mask_slice == landmark_label).astype(np.uint8)
-                            else:
-                                for label_value in [31, 32, 33, 34, 35, 36]:
-                                    landmark_mask |= (mask_slice == label_value).astype(np.uint8)
-                            
-                            landmark_masks.append(landmark_mask)
-                        
+                        dural_sac_label_val = self.dural_sac_label.get()
+                        dural_sac_masks = [(s == dural_sac_label_val).astype(np.uint8) for s in mask_slices]
+
                         if not any(np.any(mask) for mask in dural_sac_masks):
-                            self.log_message("⚠️ 没有找到硬脊膜囊区域")
-                            result['dscr_note'] = "需要硬脊膜囊标注"
-                        elif not any(np.any(mask) for mask in landmark_masks):
-                            self.log_message("⚠️ 没有找到地标点")
-                            result['dscr_note'] = "需要椎体地标点标注"
+                            self.log_message("⚠️ [DSCR错误] 没有找到有效的硬脊膜囊区域，无法自动计算DSCR。")
+                            result['dscr_note'] = "DSCR自动计算需要有效的硬脊膜囊标注"
                         else:
                             for level_name in self.config.DISC_LABELS.keys():
-                                disc_masks_for_dscr = []
-                                for mask_slice in mask_slices:
-                                    disc_mask = (mask_slice == self.config.DISC_LABELS[level_name]['disc']).astype(np.uint8)
-                                    disc_masks_for_dscr.append(disc_mask)
+                                disc_label_val = self.config.DISC_LABELS[level_name]['disc']
+                                disc_masks_for_dscr = [(s == disc_label_val).astype(np.uint8) for s in mask_slices]
                                 
                                 if any(np.any(mask) for mask in disc_masks_for_dscr):
                                     dscr_result = self.dscr_calculator.process_multi_slice(
-                                        disc_masks_for_dscr, dural_sac_masks, landmark_masks, level_name
+                                        disc_masks_for_dscr, dural_sac_masks, mask_slices, level_name
                                     )
                                     
                                     for key, value in dscr_result.items():
                                         result[f'dscr_{level_name}_{key}'] = value
                                     
-                                    self.log_message(f"{level_name} DSCR = {dscr_result.get('dscr', 'N/A'):.1f}%")
+                                    self.log_message(f"  -> {level_name} DSCR = {dscr_result.get('dscr', 'N/A'):.1f}%")
                             
                     except Exception as e:
                         self.log_message(f"❌ DSCR计算失败: {str(e)}")
@@ -2003,7 +1988,7 @@ class IntegratedFeatureExtractorGUI:
                                     self.log_message(f"  -> 处理 {level_name} T2SI...")
                                     t2si_result = self.t2si_calculator.process_multi_slice(
                                         processed_image_slices_for_si, 
-                                        np_masks_level,
+                                        disc_masks_level,
                                         csf_masks_level
                                     )
 
@@ -2142,7 +2127,7 @@ class IntegratedFeatureExtractorGUI:
 
                         if self.enable_other_texture.get():
                             try:
-                                self.log_message("计算扩展纹理特征 (按椎间盘级别)...")
+                                self.log_message("计算扩展纹理特征...")
                                 for level_name, labels in self.config.DISC_LABELS.items():
                                     self.log_message(f"  -> 处理 {level_name} 扩展纹理...")
 
@@ -2189,45 +2174,26 @@ class IntegratedFeatureExtractorGUI:
                             try:
                                 self.log_message("计算椎管狭窄率DSCR...")
                                 
-                                dural_sac_masks = []
-                                landmark_masks = []
-                                
-                                for mask_slice in mask_slices:
-                                    dural_sac_mask = (mask_slice == self.dural_sac_label.get()).astype(np.uint8)
-                                    dural_sac_masks.append(dural_sac_mask)
-                                    
-                                    landmark_mask = np.zeros_like(mask_slice, dtype=np.uint8)
-                                    if hasattr(self.config, 'LANDMARK_LABELS'):
-                                        for landmark_name, landmark_label in self.config.LANDMARK_LABELS.items():
-                                            landmark_mask |= (mask_slice == landmark_label).astype(np.uint8)
-                                    else:
-                                        for label_value in [31, 32, 33, 34, 35, 36]:
-                                            landmark_mask |= (mask_slice == label_value).astype(np.uint8)
-                                    
-                                    landmark_masks.append(landmark_mask)
-                                
+                                dural_sac_label_val = self.dural_sac_label.get()
+                                dural_sac_masks = [(s == dural_sac_label_val).astype(np.uint8) for s in mask_slices]
+
                                 if not any(np.any(mask) for mask in dural_sac_masks):
-                                    self.log_message("⚠️ 没有找到硬脊膜囊区域")
-                                    result['dscr_note'] = "需要硬脊膜囊标注"
-                                elif not any(np.any(mask) for mask in landmark_masks):
-                                    self.log_message("⚠️ 没有找到地标点")
-                                    result['dscr_note'] = "需要椎体地标点标注"
+                                    self.log_message("⚠️ [DSCR错误] 没有找到有效的硬脊膜囊区域，无法自动计算DSCR。")
+                                    result['dscr_note'] = "DSCR自动计算需要有效的硬脊膜囊标注"
                                 else:
                                     for level_name in self.config.DISC_LABELS.keys():
-                                        disc_masks_for_dscr = []
-                                        for mask_slice in mask_slices:
-                                            disc_mask = (mask_slice == self.config.DISC_LABELS[level_name]['disc']).astype(np.uint8)
-                                            disc_masks_for_dscr.append(disc_mask)
+                                        disc_label_val = self.config.DISC_LABELS[level_name]['disc']
+                                        disc_masks_for_dscr = [(s == disc_label_val).astype(np.uint8) for s in mask_slices]
                                         
                                         if any(np.any(mask) for mask in disc_masks_for_dscr):
                                             dscr_result = self.dscr_calculator.process_multi_slice(
-                                                disc_masks_for_dscr, dural_sac_masks, landmark_masks, level_name
+                                                disc_masks_for_dscr, dural_sac_masks, mask_slices, level_name
                                             )
                                             
                                             for key, value in dscr_result.items():
                                                 result[f'dscr_{level_name}_{key}'] = value
                                             
-                                            self.log_message(f"{level_name} DSCR = {dscr_result.get('dscr', 'N/A'):.1f}%")
+                                            self.log_message(f"  -> {level_name} DSCR = {dscr_result.get('dscr', 'N/A'):.1f}%")
                                     
                             except Exception as e:
                                 self.log_message(f"❌ DSCR计算失败: {str(e)}")
