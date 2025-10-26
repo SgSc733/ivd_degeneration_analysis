@@ -15,9 +15,9 @@ class TextureFeaturesCalculator(BaseCalculator):
                 lbp_radius: int = 1,
                 lbp_n_points: int = 8,
                 enable_parallel: bool = True,  
-                max_workers: Optional[int] = None):
+                max_workers: Optional[int] = None, **kwargs):
 
-        super().__init__("Extended Texture Features Calculator", enable_parallel=enable_parallel)
+        super().__init__("Extended Texture Features Calculator", enable_parallel=enable_parallel, **kwargs)
         
         self.lbp_radius = lbp_radius
         self.lbp_n_points = lbp_n_points
