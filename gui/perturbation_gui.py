@@ -5,6 +5,7 @@ import cv2
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import tkinter as tk
 import SimpleITK as sitk
+import scipy.ndimage as ndi
 import pydicom
 from pathlib import Path
 import json
@@ -189,8 +190,6 @@ class PerturbationWorker(threading.Thread):
         if base_name.endswith('.nii'):
             base_name = Path(base_name).stem
         
-        is_3d = len(image.shape) == 3 and image.shape[0] > 1
-        
         total_perturbations = len(self.perturbations)
         
         for p_idx, perturb_name in enumerate(self.perturbations):
@@ -204,43 +203,22 @@ class PerturbationWorker(threading.Thread):
             
             random_params = self._generate_random_params(perturb_name)
             
-            if is_3d:
-                perturbed_slices_img = []
-                perturbed_slices_mask = []
-                
-                for slice_idx in range(image.shape[0]):
-                    img_slice = image[slice_idx, :, :].astype(np.float32)
-                    mask_slice = mask[slice_idx, :, :].astype(np.float32)
-                    
-                    perturbed_img, perturbed_mask = self._apply_perturbation_with_params(
-                        img_slice, mask_slice, perturb_name, random_params
-                    )
-                    
-                    perturbed_slices_img.append(perturbed_img)
-                    perturbed_slices_mask.append(perturbed_mask)
-                    
-                    progress = int(((p_idx + (slice_idx + 1) / image.shape[0]) / total_perturbations) * 100)
-                    self.emit_progress(progress)
-                
-                perturbed_img = np.stack(perturbed_slices_img, axis=0)
-                perturbed_mask = np.stack(perturbed_slices_mask, axis=0)
-            else:
-                perturbed_img, perturbed_mask = self._apply_perturbation_with_params(
-                    image.astype(np.float32), mask.astype(np.float32), perturb_name, random_params
-                )
-                progress = int(((p_idx + 1) / total_perturbations) * 100)
-                self.emit_progress(progress)
+            perturbed_img, perturbed_mask = self._apply_perturbation_with_params(
+                image.astype(np.float32), mask.astype(np.float32), perturb_name, random_params, img_path
+            )
+
+            progress = int(((p_idx + 1) / total_perturbations) * 100)
+            self.emit_progress(progress)
             
             img_out_path = os.path.join(self.image_output_dir, f"{base_name}_{safe_name}.nii.gz")
             mask_out_path = os.path.join(self.mask_output_dir, f"{base_name}_{safe_name}_mask.nii.gz")
             
-            self.save_medical_image(perturbed_img, img_out_path)
-            self.save_medical_image(perturbed_mask, mask_out_path)
+            self.save_medical_image(perturbed_img, img_out_path, img_path)
+            self.save_medical_image(perturbed_mask, mask_out_path, img_path)
             
             self.emit_status(f"已保存: {base_name}_{safe_name}")
 
     def _apply_perturbation(self, img, mask, perturb_name):
-
         img = np.squeeze(img) if img.ndim > 2 else img
         mask = np.squeeze(mask) if mask.ndim > 2 else mask
         
@@ -277,7 +255,6 @@ class PerturbationWorker(threading.Thread):
             return img.copy(), mask.copy()
             
     def _apply_perturbation_to_slice(self, img_slice, mask_slice, perturb_name):
-
         if len(img_slice.shape) > 2:
             img_slice = img_slice.squeeze()
         if len(mask_slice.shape) > 2:
@@ -327,60 +304,87 @@ class PerturbationWorker(threading.Thread):
             self.emit_error(f"读取文件错误 {path}: {str(e)}")
             return None
             
-    def save_medical_image(self, array, path):
+    def save_medical_image(self, array, path, reference_path=None):
         img = sitk.GetImageFromArray(array)
+        if reference_path and os.path.exists(reference_path):
+            try:
+                reference_img = sitk.ReadImage(reference_path)
+                img.CopyInformation(reference_img)
+            except Exception as e:
+                self.emit_status(f"警告: 无法从 {reference_path} 复制元数据: {e}")
         sitk.WriteImage(img, path)
         
     def apply_dilation(self, image, mask):
-
-        image = np.squeeze(image) if image.ndim > 2 else image
-        mask = np.squeeze(mask) if mask.ndim > 2 else mask
-        
+        kernel_size = self.params.get('morph_kernel_size', 1)
+        iterations = self.params.get('morph_iterations', 1)
         disc_labels = [3, 5, 7, 9, 11]
         
-        kernel_size = self.params.get('morph_kernel_size', 2)
-        iterations = self.params.get('morph_iterations', 2)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-        
-        result_mask = mask.copy()
-        
-        for label in disc_labels:
-            binary_mask = (mask == label).astype(np.uint8)
-            if np.sum(binary_mask) == 0:
-                continue
-                
-            dilated = cv2.dilate(binary_mask, kernel, iterations=iterations)
+        if image.ndim == 3:
+            struct = ndi.generate_binary_structure(3, kernel_size)
             
-            result_mask[dilated > 0] = label
+            final_mask = mask.copy()
+            final_mask[np.isin(mask, disc_labels)] = 0
+            
+            for label in disc_labels:
+                binary_mask = (mask == label)
+                if not np.any(binary_mask):
+                    continue
+                
+                dilated = ndi.binary_dilation(binary_mask, structure=struct, iterations=iterations)
+                final_mask[dilated] = label
+            
+            return image.copy(), final_mask
         
-        return image.copy(), result_mask
-
+        else:
+            result_mask = mask.copy()
+            kernel_2d_size = max(2, iterations * 2)
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_2d_size, kernel_2d_size))
+            for label in disc_labels:
+                binary_mask = (mask == label).astype(np.uint8)
+                if np.sum(binary_mask) == 0:
+                    continue
+                dilated = cv2.dilate(binary_mask, kernel, iterations=1)
+                result_mask[dilated > 0] = label
+            return image.copy(), result_mask
 
     def apply_erosion(self, image, mask):
-
-        image = np.squeeze(image) if image.ndim > 2 else image
-        mask = np.squeeze(mask) if mask.ndim > 2 else mask
-        
+        kernel_size = self.params.get('morph_kernel_size', 1)
+        iterations = self.params.get('morph_iterations', 1)
         disc_labels = [3, 5, 7, 9, 11]
-        
-        kernel_size = self.params.get('morph_kernel_size', 2)
-        iterations = self.params.get('morph_iterations', 2)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-        
-        result_mask = mask.copy()
-        
-        for label in disc_labels:
-            binary_mask = (mask == label).astype(np.uint8)
-            if np.sum(binary_mask) == 0:
-                continue
-                
-            eroded = cv2.erode(binary_mask, kernel, iterations=iterations)
+
+        if image.ndim == 3:
+            struct = ndi.generate_binary_structure(3, kernel_size)
             
-            if np.sum(eroded) > self.MIN_PIXEL_THRESHOLD:
-                result_mask[mask == label] = 0
-                result_mask[eroded > 0] = label
-        
-        return image.copy(), result_mask
+            final_mask = mask.copy()
+            final_mask[np.isin(mask, disc_labels)] = 0
+            
+            for label in disc_labels:
+                binary_mask = (mask == label)
+                if not np.any(binary_mask):
+                    continue
+                    
+                eroded = ndi.binary_erosion(binary_mask, structure=struct, iterations=iterations)
+                
+                if np.sum(eroded) > self.MIN_PIXEL_THRESHOLD:
+                    final_mask[eroded] = label
+                else: 
+                    final_mask[binary_mask] = label
+
+            return image.copy(), final_mask
+
+        else:
+            result_mask = mask.copy()
+            kernel_2d_size = max(2, iterations * 2)
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_2d_size, kernel_2d_size))
+            for label in disc_labels:
+                binary_mask = (mask == label).astype(np.uint8)
+                if np.sum(binary_mask) == 0:
+                    continue
+                eroded = cv2.erode(binary_mask, kernel, iterations=1)
+                if np.sum(eroded) > self.MIN_PIXEL_THRESHOLD:
+                    result_mask[mask == label] = 0
+                    result_mask[eroded > 0] = label
+            return image.copy(), result_mask
 
     def apply_contour_randomization(self, image, mask):
         base_kernel_size = self.params.get('morph_kernel_size', 2)
@@ -401,7 +405,6 @@ class PerturbationWorker(threading.Thread):
         return self.apply_contour_randomization_with_params(image, mask, random_params)
 
     def apply_translation(self, image, mask):
-
         image = np.squeeze(image) if image.ndim > 2 else image
         mask = np.squeeze(mask) if mask.ndim > 2 else mask
         
@@ -418,7 +421,6 @@ class PerturbationWorker(threading.Thread):
         return translated_img, translated_mask
 
     def apply_rotation(self, image, mask):
-
         image = np.squeeze(image) if image.ndim > 2 else image
         mask = np.squeeze(mask) if mask.ndim > 2 else mask
         
@@ -436,7 +438,6 @@ class PerturbationWorker(threading.Thread):
         return rotated_img, rotated_mask
 
     def apply_gaussian_noise(self, image, mask):
-
         image = np.squeeze(image) if image.ndim > 2 else image
         mask = np.squeeze(mask) if mask.ndim > 2 else mask
         
@@ -447,7 +448,6 @@ class PerturbationWorker(threading.Thread):
         return noisy_image.astype(np.float32), mask.copy()
 
     def apply_translation_rotation(self, image, mask):
-
         image = np.squeeze(image) if image.ndim > 2 else image
         mask = np.squeeze(mask) if mask.ndim > 2 else mask
         
@@ -470,8 +470,18 @@ class PerturbationWorker(threading.Thread):
         
         return transformed_img, transformed_mask
     
-    def _generate_random_params(self, perturb_name):
+    def _get_mask_center_of_mass(self, sitk_mask):
 
+        binary_mask = sitk_mask > 0
+        
+        label_stats_filter = sitk.LabelShapeStatisticsImageFilter()
+        label_stats_filter.Execute(binary_mask)
+        
+        center_of_mass_phys = label_stats_filter.GetCentroid(1)
+        
+        return center_of_mass_phys
+    
+    def _generate_random_params(self, perturb_name):
         params = {}
         
         if "平移" in perturb_name:
@@ -487,10 +497,7 @@ class PerturbationWorker(threading.Thread):
             base_kernel_size = self.params['morph_kernel_size']
             base_iterations = self.params['morph_iterations']
             params['use_dilation'] = np.random.random() > 0.5
-            params['kernel_size'] = np.random.randint(
-                max(3, base_kernel_size - 2),
-                base_kernel_size + 3
-            )
+            params['kernel_size'] = base_kernel_size 
             params['iterations'] = np.random.randint(
                 max(1, base_iterations - 1),
                 base_iterations + 2
@@ -498,8 +505,7 @@ class PerturbationWorker(threading.Thread):
         
         return params
 
-    def _apply_perturbation_with_params(self, img, mask, perturb_name, random_params):
-
+    def _apply_perturbation_with_params(self, img, mask, perturb_name, random_params, img_path=None):
         img = np.squeeze(img) if img.ndim > 2 else img
         mask = np.squeeze(mask) if mask.ndim > 2 else mask
         
@@ -512,119 +518,180 @@ class PerturbationWorker(threading.Thread):
         elif perturb_name == "轮廓随机化":
             return self.apply_contour_randomization_with_params(img, mask, random_params)
         elif perturb_name == "平移":
-            return self.apply_translation_with_params(img, mask, random_params)
+            return self.apply_translation_with_params(img, mask, random_params, img_path)
         elif perturb_name == "旋转":
-            return self.apply_rotation_with_params(img, mask, random_params)
+            return self.apply_rotation_with_params(img, mask, random_params, img_path)
         elif perturb_name == "高斯噪声":
             return self.apply_gaussian_noise(img, mask)
         elif perturb_name == "平移+旋转":
-            return self.apply_translation_rotation_with_params(img, mask, random_params)
+            return self.apply_translation_rotation_with_params(img, mask, random_params, img_path)
         elif perturb_name == "膨胀+平移+旋转":
             img_temp, mask_temp = self.apply_dilation(img, mask)
-            return self.apply_translation_rotation_with_params(img_temp, mask_temp, random_params)
+            return self.apply_translation_rotation_with_params(img_temp, mask_temp, random_params, img_path)
         elif perturb_name == "腐蚀+平移+旋转":
             img_temp, mask_temp = self.apply_erosion(img, mask)
-            return self.apply_translation_rotation_with_params(img_temp, mask_temp, random_params)
+            return self.apply_translation_rotation_with_params(img_temp, mask_temp, random_params, img_path)
         elif perturb_name == "轮廓随机化+平移+旋转":
             img_temp, mask_temp = self.apply_contour_randomization_with_params(img, mask, random_params)
-            return self.apply_translation_rotation_with_params(img_temp, mask_temp, random_params)
+            return self.apply_translation_rotation_with_params(img_temp, mask_temp, random_params, img_path)
         elif perturb_name == "轮廓随机化+平移+旋转+噪声":
             img_temp, mask_temp = self.apply_contour_randomization_with_params(img, mask, random_params)
-            img_temp2, mask_temp2 = self.apply_translation_rotation_with_params(img_temp, mask_temp, random_params)
+            img_temp2, mask_temp2 = self.apply_translation_rotation_with_params(img_temp, mask_temp, random_params, img_path)
             return self.apply_gaussian_noise(img_temp2, mask_temp2)
         else:
             return img.copy(), mask.copy()
 
-    def apply_translation_with_params(self, image, mask, params):
+    def apply_translation_with_params(self, image, mask, params, img_path):
+        tx = params.get('tx', 0)
+        ty = params.get('ty', 0)
 
-        image = np.squeeze(image) if image.ndim > 2 else image
-        mask = np.squeeze(mask) if mask.ndim > 2 else mask
+        if image.ndim == 3:
+            reference_sitk_image = sitk.ReadImage(img_path)
+
+            sitk_image = sitk.GetImageFromArray(image)
+            sitk_image.CopyInformation(reference_sitk_image)
+            
+            sitk_mask = sitk.GetImageFromArray(mask)
+            sitk_mask.CopyInformation(reference_sitk_image)
+
+            translation_vector = (0.0, float(ty), float(tx))
+            transform = sitk.TranslationTransform(3, translation_vector)
+            
+            resampled_sitk_image = sitk.Resample(sitk_image, reference_sitk_image, transform, sitk.sitkLinear, 0.0, sitk_image.GetPixelID())
+            resampled_sitk_mask = sitk.Resample(sitk_mask, reference_sitk_image, transform, sitk.sitkNearestNeighbor, 0.0, sitk_mask.GetPixelID())
+
+            return sitk.GetArrayFromImage(resampled_sitk_image), sitk.GetArrayFromImage(resampled_sitk_mask)
         
+        else:
+            M = np.float32([[1, 0, tx], [0, 1, ty]])
+            h, w = image.shape[:2]
+            translated_img = cv2.warpAffine(image.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+            translated_mask = cv2.warpAffine(mask.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+            return translated_img, translated_mask
+
+    def apply_rotation_with_params(self, image, mask, params, img_path):
+        angle = params.get('angle', 0)
+        
+        if image.ndim == 3:
+            reference_sitk_image = sitk.ReadImage(img_path)
+
+            sitk_image = sitk.GetImageFromArray(image)
+            sitk_image.CopyInformation(reference_sitk_image)
+            
+            sitk_mask = sitk.GetImageFromArray(mask)
+            sitk_mask.CopyInformation(reference_sitk_image)
+            
+            angle_rad = np.deg2rad(angle)
+            transform = sitk.Euler3DTransform()
+            
+            center_phys = self._get_mask_center_of_mass(sitk_mask)
+            transform.SetCenter(center_phys)
+
+            transform.SetRotation(angle_rad, 0, 0)
+
+            resampled_sitk_image = sitk.Resample(sitk_image, reference_sitk_image, transform, sitk.sitkLinear, 0.0, sitk_image.GetPixelID())
+            resampled_sitk_mask = sitk.Resample(sitk_mask, reference_sitk_image, transform, sitk.sitkNearestNeighbor, 0.0, sitk_mask.GetPixelID())
+
+            return sitk.GetArrayFromImage(resampled_sitk_image), sitk.GetArrayFromImage(resampled_sitk_mask)
+
+        else:
+            h, w = image.shape[:2]
+            center = (w // 2, h // 2)
+            M = cv2.getRotationMatrix2D(center, angle, 1.0)
+            rotated_img = cv2.warpAffine(image.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+            rotated_mask = cv2.warpAffine(mask.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+            return rotated_img, rotated_mask
+
+    def apply_translation_rotation_with_params(self, image, mask, params, img_path):
+        angle = params.get('angle', 0)
         tx = params.get('tx', 0)
         ty = params.get('ty', 0)
         
-        M = np.float32([[1, 0, tx], [0, 1, ty]])
-        h, w = image.shape[:2]
-        
-        translated_img = cv2.warpAffine(image.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        translated_mask = cv2.warpAffine(mask.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        
-        return translated_img, translated_mask
+        if image.ndim == 3:
+            reference_sitk_image = sitk.ReadImage(img_path)
 
-    def apply_rotation_with_params(self, image, mask, params):
+            sitk_image = sitk.GetImageFromArray(image)
+            sitk_image.CopyInformation(reference_sitk_image)
+            
+            sitk_mask = sitk.GetImageFromArray(mask)
+            sitk_mask.CopyInformation(reference_sitk_image)
 
-        image = np.squeeze(image) if image.ndim > 2 else image
-        mask = np.squeeze(mask) if mask.ndim > 2 else mask
-        
-        angle = params.get('angle', 0)
-        
-        h, w = image.shape[:2]
-        center = (w // 2, h // 2)
-        
-        M = cv2.getRotationMatrix2D(center, angle, 1.0)
-        
-        rotated_img = cv2.warpAffine(image.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        rotated_mask = cv2.warpAffine(mask.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        
-        return rotated_img, rotated_mask
+            angle_rad = np.deg2rad(angle)
+            translation_vector = (0.0, float(ty), float(tx))
 
-    def apply_translation_rotation_with_params(self, image, mask, params):
+            transform = sitk.Euler3DTransform()
+            center_phys = self._get_mask_center_of_mass(sitk_mask)
+            transform.SetCenter(center_phys)
 
-        image = np.squeeze(image) if image.ndim > 2 else image
-        mask = np.squeeze(mask) if mask.ndim > 2 else mask
-        
-        h, w = image.shape[:2]
-        center = (w // 2, h // 2)
-        
-        angle = params.get('angle', 0)
-        tx = params.get('tx', 0)
-        ty = params.get('ty', 0)
-        
-        M_rot = cv2.getRotationMatrix2D(center, angle, 1.0)
-        M_rot[0, 2] += tx
-        M_rot[1, 2] += ty
-        
-        transformed_img = cv2.warpAffine(image.astype(np.float32), M_rot, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        transformed_mask = cv2.warpAffine(mask.astype(np.float32), M_rot, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        
-        return transformed_img, transformed_mask
+            transform.SetRotation(angle_rad, 0, 0)
+            transform.SetTranslation(translation_vector)
+
+            resampled_sitk_image = sitk.Resample(sitk_image, reference_sitk_image, transform, sitk.sitkLinear, 0.0, sitk_image.GetPixelID())
+            resampled_sitk_mask = sitk.Resample(sitk_mask, reference_sitk_image, transform, sitk.sitkNearestNeighbor, 0.0, sitk_mask.GetPixelID())
+            
+            return sitk.GetArrayFromImage(resampled_sitk_image), sitk.GetArrayFromImage(resampled_sitk_mask)
+
+        else:
+            h, w = image.shape[:2]
+            center = (w // 2, h // 2)
+            M_rot = cv2.getRotationMatrix2D(center, angle, 1.0)
+            M_rot[0, 2] += tx
+            M_rot[1, 2] += ty
+            transformed_img = cv2.warpAffine(image.astype(np.float32), M_rot, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+            transformed_mask = cv2.warpAffine(mask.astype(np.float32), M_rot, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+            return transformed_img, transformed_mask
 
     def apply_contour_randomization_with_params(self, image, mask, params):
-
-        image = np.squeeze(image) if image.ndim > 2 else image
-        mask = np.squeeze(mask) if mask.ndim > 2 else mask
-        
         disc_labels = [3, 5, 7, 9, 11]
-        
-        base_kernel_size = self.params.get('morph_kernel_size', 3)
-        base_iterations = self.params.get('morph_iterations', 2)
-        
-        result_mask = mask.copy()
         use_dilation = params.get('use_dilation', True)
-        
-        random_kernel_size = params.get('kernel_size', base_kernel_size)
-        random_iterations = params.get('iterations', base_iterations)
-        
-        for label in disc_labels:
-            binary_mask = (mask == label).astype(np.uint8)
-            if np.sum(binary_mask) == 0:
-                continue
-            
-            kernel = cv2.getStructuringElement(
-                cv2.MORPH_ELLIPSE,
-                (random_kernel_size, random_kernel_size)
-            )
-            
-            if use_dilation:
-                processed = cv2.dilate(binary_mask, kernel, iterations=random_iterations)
-            else:
-                processed = cv2.erode(binary_mask, kernel, iterations=random_iterations)
-            
-            result_mask[mask == label] = 0
-            result_mask[processed > 0] = label
-        
-        return image.copy(), result_mask
+        random_kernel_conn = params.get('kernel_size', self.params.get('morph_kernel_size', 1))
+        random_iterations = params.get('iterations', self.params.get('morph_iterations', 1))
 
+        if image.ndim == 3:
+            struct = ndi.generate_binary_structure(3, random_kernel_conn)
+
+            final_mask = mask.copy()
+            final_mask[np.isin(mask, disc_labels)] = 0
+            
+            for label in disc_labels:
+                binary_mask = (mask == label)
+                if not np.any(binary_mask):
+                    continue
+                
+                if use_dilation:
+                    processed = ndi.binary_dilation(binary_mask, structure=struct, iterations=random_iterations)
+                else:
+                    processed = ndi.binary_erosion(binary_mask, structure=struct, iterations=random_iterations)
+
+                if np.sum(processed) < self.MIN_PIXEL_THRESHOLD:
+                    final_mask[binary_mask] = label
+                else:
+                    final_mask[processed] = label
+
+            return image.copy(), final_mask
+
+        else:
+            result_mask = mask.copy()
+            kernel_2d_size = max(2, random_iterations * 2)
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_2d_size, kernel_2d_size))
+            
+            for label in disc_labels:
+                binary_mask = (mask == label).astype(np.uint8)
+                if np.sum(binary_mask) == 0:
+                    continue
+                
+                if use_dilation:
+                    processed = cv2.dilate(binary_mask, kernel, iterations=1)
+                else:
+                    processed = cv2.erode(binary_mask, kernel, iterations=1)
+                
+                if np.sum(processed) < self.MIN_PIXEL_THRESHOLD and not use_dilation:
+                     result_mask[mask == label] = label
+                else:
+                    result_mask[mask == label] = 0
+                    result_mask[processed > 0] = label
+        
+            return image.copy(), result_mask
 
 class PerturbationGUI:
     def __init__(self, parent):
@@ -882,7 +949,7 @@ class PerturbationGUI:
         morph_label.grid(row=row, column=0, sticky="w", pady=2)
         self.widgets['morph_label'] = morph_label
 
-        self.morph_kernel_size = tk.IntVar(value=2)
+        self.morph_kernel_size = tk.IntVar(value=1)
         morph_spin = ttk.Spinbox(param_grid, from_=2, to=5, 
                                 textvariable=self.morph_kernel_size, width=10)
         morph_spin.grid(row=row, column=1, sticky="w", padx=5, pady=2)
@@ -891,7 +958,7 @@ class PerturbationGUI:
         morph_iter_label.grid(row=row, column=2, sticky="w", padx=(20,0), pady=2)
         self.widgets['morph_iter_label'] = morph_iter_label
 
-        self.morph_iterations = tk.IntVar(value=2)
+        self.morph_iterations = tk.IntVar(value=1)
         morph_iter_spin = ttk.Spinbox(param_grid, from_=1, to=10,
                                     textvariable=self.morph_iterations, width=10)
         morph_iter_spin.grid(row=row, column=3, sticky="w", padx=5, pady=2)
@@ -1029,7 +1096,6 @@ class PerturbationGUI:
         self.check_callbacks()
 
     def check_callbacks(self):
-
         try:
             while not self.callback_queue.empty():
                 msg_type, msg_data = self.callback_queue.get_nowait()
