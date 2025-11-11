@@ -16,6 +16,7 @@ from typing import List, Dict, Optional, Tuple, Any
 import multiprocessing as mp
 from .perturbation_gui import PerturbationGUI, PerturbationWorker
 from .robustness_gui import RobustnessGUI
+from model import deep_features_core
 
 try:
     from PIL import Image, ImageTk
@@ -57,7 +58,7 @@ except Exception as e:
 LANG_DICT = {
     'cn': {
         'title': '椎间盘退变分析系统',
-        'other_features': '其他特征',
+        'other_features': '经典特征',
         'enable_dhi': '椎间盘高度指数 (DHI)',
         'enable_asi': '峰值信号强度差 (ASI)',
         'enable_fd': '分形维度 (FD)',
@@ -73,8 +74,9 @@ LANG_DICT = {
         'other_complete': '✅ 其他特征提取完成',
         'feature_type': '特征类型:',
         'pyradiomics_features': 'PyRadiomics特征',
-        'other_features_option': '其他特征',
-        'both_features': '两者都提取',
+        'other_features_option': '经典特征',
+        'deep_learning_features':'深度学习特征',
+        'all_features': '全部提取',
         'file_selection': '📁 文件选择',
         'process_mode': '处理模式:',
         'batch_mode': '📊 批量处理',
@@ -306,6 +308,7 @@ class IntegratedFeatureExtractorGUI:
 
 
         self._init_pyradiomics_variables()
+        self._init_deep_features_variables()
 
         self.widgets = {}
 
@@ -315,7 +318,7 @@ class IntegratedFeatureExtractorGUI:
 
         if not PYRADIOMICS_AVAILABLE and PYRADIOMICS_ERROR:
             messagebox.showwarning("PyRadiomics不可用", 
-                                 f"PyRadiomics功能将被禁用:\n\n{PYRADIOMICS_ERROR}\n\n仍可以使用自定义特征提取功能。")
+                                 f"PyRadiomics功能将被禁用:\n\n{PYRADIOMICS_ERROR}\n\n仍可以其他特征提取功能。")
             
     def _start_log_processor(self):
         self._process_log_queue()
@@ -402,6 +405,12 @@ class IntegratedFeatureExtractorGUI:
         self.enable_gldm = tk.BooleanVar(value=True)
         self.enable_ngtdm = tk.BooleanVar(value=True)
 
+    def _init_deep_features_variables(self):
+
+        self.deep_model_size = tk.StringVar(value="base")
+        self.deep_agg_strategy = tk.StringVar(value="both")
+        self.deep_padding_ratio = tk.DoubleVar(value=0.2)
+
     def get_text(self, key):
         lang = self.current_lang.get()
         return LANG_DICT[lang].get(key, key)
@@ -446,8 +455,10 @@ class IntegratedFeatureExtractorGUI:
                 self.widgets['pyrad_radio'].config(text=self.get_text('pyradiomics_features'))
             if 'other_radio' in self.widgets:
                 self.widgets['other_radio'].config(text=self.get_text('other_features_option'))
+            if 'deep_radio' in self.widgets:
+                self.widgets['deep_radio'].config(text=self.get_text('deep_learning_features'))
             if 'both_radio' in self.widgets:
-                self.widgets['both_radio'].config(text=self.get_text('both_features'))
+                self.widgets['both_radio'].config(text=self.get_text('all_features'))
 
             if 'other_feature_group' in self.widgets:
                 self.widgets['other_feature_group'].config(text=self.get_text('other_features'))
@@ -884,20 +895,26 @@ class IntegratedFeatureExtractorGUI:
         type_frame.pack(fill="x", pady=5)
         self.widgets['feature_type_frame'] = type_frame
         
+        other_radio = ttk.Radiobutton(type_frame, text=self.get_text('other_features_option'), 
+                                    variable=self.feature_type, value="other",
+                                    command=self._on_feature_type_change)
+        other_radio.pack(side="left", padx=10)
+        self.widgets['other_radio'] = other_radio
+
         pyrad_radio = ttk.Radiobutton(type_frame, text=self.get_text('pyradiomics_features'), 
                                     variable=self.feature_type, value="pyradiomics",
                                     state="normal" if PYRADIOMICS_AVAILABLE else "disabled",
                                     command=self._on_feature_type_change)
         pyrad_radio.pack(side="left", padx=10)
         self.widgets['pyrad_radio'] = pyrad_radio
+
+        deep_radio = ttk.Radiobutton(type_frame, text=self.get_text('deep_learning_features'), 
+                                     variable=self.feature_type, value="deep",
+                                     command=self._on_feature_type_change)
+        deep_radio.pack(side="left", padx=10)
+        self.widgets['deep_radio'] = deep_radio
         
-        other_radio = ttk.Radiobutton(type_frame, text=self.get_text('other_features_option'), 
-                                    variable=self.feature_type, value="other",
-                                    command=self._on_feature_type_change)
-        other_radio.pack(side="left", padx=10)
-        self.widgets['other_radio'] = other_radio
-        
-        both_radio = ttk.Radiobutton(type_frame, text=self.get_text('both_features'), 
+        both_radio = ttk.Radiobutton(type_frame, text=self.get_text('all_features'), 
                                     variable=self.feature_type, value="both",
                                     command=self._on_feature_type_change)
         both_radio.pack(side="left", padx=10)
@@ -906,30 +923,31 @@ class IntegratedFeatureExtractorGUI:
     def _on_feature_type_change(self):
         feature_type = self.feature_type.get()
 
-        if hasattr(self, 'other_features_tab'):
-            try:
-                self.notebook.forget(self.other_features_tab)
-            except tk.TclError:
-                pass
-        
-        if hasattr(self, 'pyrad_tab') and PYRADIOMICS_AVAILABLE:
-            try:
-                self.notebook.forget(self.pyrad_tab)
-            except tk.TclError:
-                pass
+        all_tabs = {
+            'other': getattr(self, 'other_features_tab', None),
+            'pyrad': getattr(self, 'pyrad_tab', None),
+            'deep': getattr(self, 'deep_features_tab', None)
+        }
+
+        for tab_widget in all_tabs.values():
+            if tab_widget:
+                try:
+                    self.notebook.forget(tab_widget)
+                except tk.TclError:
+                    pass
 
         if feature_type == "other":
-            self.notebook.add(self.other_features_tab, text="其他特征")
-            self.notebook.select(self.other_features_tab)
+            if all_tabs['other']: self.notebook.add(all_tabs['other'], text="经典特征")
         elif feature_type == "pyradiomics":
-            if PYRADIOMICS_AVAILABLE:
-                self.notebook.add(self.pyrad_tab, text="PyRadiomic特征")
-                self.notebook.select(self.pyrad_tab)
+            if all_tabs['pyrad'] and PYRADIOMICS_AVAILABLE:
+                self.notebook.add(all_tabs['pyrad'], text="PyRadiomics特征")
+        elif feature_type == "deep":
+            if all_tabs['deep']: self.notebook.add(all_tabs['deep'], text="深度学习特征")
         elif feature_type == "both":
-            self.notebook.add(self.other_features_tab, text="其他特征")
-            if PYRADIOMICS_AVAILABLE:
-                self.notebook.add(self.pyrad_tab, text="PyRadiomic特征")
-            self.notebook.select(self.other_features_tab)
+            if all_tabs['other']: self.notebook.add(all_tabs['other'], text="经典特征")
+            if all_tabs['pyrad'] and PYRADIOMICS_AVAILABLE:
+                self.notebook.add(all_tabs['pyrad'], text="PyRadiomics特征")
+            if all_tabs['deep']: self.notebook.add(all_tabs['deep'], text="深度学习特征")
     
     def _setup_parameters_notebook(self, parent):
         param_container = ttk.LabelFrame(parent, text="参数设置", padding="10")
@@ -940,6 +958,9 @@ class IntegratedFeatureExtractorGUI:
 
         self.other_features_tab = ttk.Frame(self.notebook, padding="10")
         self._setup_other_features(self.other_features_tab)
+
+        self.deep_features_tab = ttk.Frame(self.notebook, padding="10")
+        self._setup_deep_features(self.deep_features_tab)
 
         if PYRADIOMICS_AVAILABLE:
             self.pyrad_tab = ttk.Frame(self.notebook, padding="10")
@@ -1011,12 +1032,6 @@ class IntegratedFeatureExtractorGUI:
         correct_cb = ttk.Checkbutton(basic_group, text=self.get_text('correct_mask'), variable=self.correct_mask)
         correct_cb.grid(row=row, column=0, columnspan=2, sticky="w", pady=2)
         self.widgets['correct_cb'] = correct_cb
-
-        row += 1
-        label_label = ttk.Label(basic_group, text=self.get_text('label'))
-        label_label.grid(row=row, column=0, sticky="w", pady=2)
-        self.widgets['label_label'] = label_label
-        ttk.Entry(basic_group, textvariable=self.label, width=5).grid(row=row, column=1, sticky="w", pady=2, padx=5)
 
         feature_group = ttk.LabelFrame(basic_right, text=self.get_text('feature_classes'), padding="10")
         feature_group.pack(fill="x", pady=5)
@@ -1382,6 +1397,31 @@ class IntegratedFeatureExtractorGUI:
         cpu_label = ttk.Label(worker_frame, text=f"({self.get_text('cpu_cores')} {mp.cpu_count()})")
         cpu_label.pack(side="left")
         self.widgets['cpu_label'] = cpu_label
+
+    def _setup_deep_features(self, parent):
+
+        deep_group = ttk.LabelFrame(parent, text="深度学习特征参数", padding="10")
+        deep_group.pack(fill="x", pady=5)
+
+        model_frame = ttk.Frame(deep_group)
+        model_frame.pack(fill="x", pady=3)
+        ttk.Label(model_frame, text="模型版本:", width=15).pack(side="left")
+        model_combo = ttk.Combobox(model_frame, textvariable=self.deep_model_size, 
+                                   values=["base", "small"], state="readonly", width=15)
+        model_combo.pack(side="left", padx=5)
+
+        agg_frame = ttk.Frame(deep_group)
+        agg_frame.pack(fill="x", pady=3)
+        ttk.Label(agg_frame, text="Patch聚合策略:", width=15).pack(side="left")
+        agg_combo = ttk.Combobox(agg_frame, textvariable=self.deep_agg_strategy, 
+                                 values=["mean", "max", "both"], state="readonly", width=15)
+        agg_combo.pack(side="left", padx=5)
+
+        pad_frame = ttk.Frame(deep_group)
+        pad_frame.pack(fill="x", pady=3)
+        ttk.Label(pad_frame, text="安全边距:", width=15).pack(side="left")
+        pad_entry = ttk.Entry(pad_frame, textvariable=self.deep_padding_ratio, width=17)
+        pad_entry.pack(side="left", padx=5)
     
     def _setup_controls(self, parent):
         control_frame = ttk.Frame(parent)
@@ -1438,33 +1478,21 @@ class IntegratedFeatureExtractorGUI:
         self.extraction_thread = threading.Thread(target=self.run_extraction)
         self.extraction_thread.daemon = True
         self.extraction_thread.start()
-    
-    def extract_other_features(self, matched_pairs=None):
-        results = {}
-        
-        try:
-            if self.input_type.get() == "single":
-                image_path = self.input_path.get()
-                mask_path = self.mask_path.get()
-                
-                if not image_path or not mask_path:
-                    raise ValueError("请选择图像和掩码文件")
-                
-                self.log_message("加载图像和掩码...")
+
+
+    def _process_single_case_other_features(self, image_path: str, mask_path: str, case_id: str) -> Dict:
+
+            try:
+                self.log_message(f"  > 开始处理病例: {case_id}")
+                self.log_message("  > 加载图像和掩码...")
 
                 image, mask = self.image_io.load_image_and_mask(image_path, mask_path)
 
                 spacing = list(image.GetSpacing())[::-1]
-                self.log_message(f"图像间距: {spacing}")
+                self.log_message(f"  > 图像间距: {spacing}")
 
                 image_array = self.image_io.sitk_to_numpy(image)
                 mask_array = self.image_io.sitk_to_numpy(mask)
-
-                p = Path(image_path)
-                base_name = p.name
-                while Path(base_name).suffix:
-                    base_name = Path(base_name).stem
-                case_id = base_name
 
                 result = {
                     'case_id': case_id,
@@ -1479,26 +1507,10 @@ class IntegratedFeatureExtractorGUI:
                     mask_array, self.config.NUM_SLICES, self.config.SLICE_AXIS
                 )
 
-                roi_masks = []
-                for mask_slice in mask_slices:
-                    roi_mask = (mask_slice > 0).astype(np.uint8)
-                    roi_masks.append(roi_mask)
-
-                if not any(np.any(mask) for mask in roi_masks):
-                    self.log_message("⚠️ 没有找到有效的ROI区域")
+                if not any(np.any(s > 0) for s in mask_slices):
+                    self.log_message("  > ⚠️ 掩码中未找到有效ROI，跳过此病例")
                     result['status'] = 'no_roi_found'
-                    return {'results': [result]}
-
-                csf_masks = []
-                if self.enable_other_asi.get() or self.enable_other_t2si.get():
-                    csf_label = self.dural_sac_label.get()
-                    for mask_slice in mask_slices:
-                        csf_mask = (mask_slice == csf_label).astype(np.uint8)
-                        csf_masks.append(csf_mask)
-
-                    if not any(np.any(mask) for mask in csf_masks):
-                        self.log_message("⚠️ 没有找到CSF区域，ASI/T2SI将使用全局标准化")
-                        csf_masks = None
+                    return result
 
                 if self.enable_other_dhi.get():
                     try:
@@ -1533,7 +1545,7 @@ class IntegratedFeatureExtractorGUI:
                             )
                             
                             for key, value in dhi_result.items():
-                                result[f'dhi_{level_name}_{key}'] = value
+                                result[f'classic_{level_name}_dhi_{key}'] = value
                             
                             self.log_message(f"{level_name} DHI = {dhi_result.get('dhi', 'N/A'):.3f}")
                             dhi_results_all_levels.append(dhi_result)
@@ -1585,7 +1597,7 @@ class IntegratedFeatureExtractorGUI:
                             asi_result = self.asi_calculator.process_multi_slice(
                                 processed_image_slices_for_si, disc_masks_level, csf_masks_level
                             )
-                            result.update({f'asi_{level_name}_{k}': v for k, v in asi_result.items()})
+                            result.update({f'classic_{level_name}_asi_{k}': v for k, v in asi_result.items()})
                             self.log_message(f"  -> {level_name} ASI = {asi_result.get('asi', 'N/A'):3f}")
                         except Exception as e:
                             self.log_message(f"❌ {level_name} ASI计算失败: {str(e)}")
@@ -1611,7 +1623,7 @@ class IntegratedFeatureExtractorGUI:
                                 csf_masks_level
                             )
                             serializable_t2si_result = {k: v for k, v in t2si_result.items() if k != 'slice_results'}
-                            result.update({f't2si_{level_name}_{k}': v for k, v in serializable_t2si_result.items()})
+                            result.update({f'classic_{level_name}_t2si_{k}': v for k, v in serializable_t2si_result.items()})
                             self.log_message(f"  -> {level_name} T2SI比率 = {t2si_result.get('si_ratio', 'N/A'):.3f}")
                         except Exception as e:
                             self.log_message(f"❌ {level_name} T2SI计算失败: {str(e)}")
@@ -1646,7 +1658,7 @@ class IntegratedFeatureExtractorGUI:
                             fd_result = self.fd_calculator.process_multi_slice(
                                 fd_slices, fd_masks
                             )
-                            result.update({f'fd_{level_name}_{k}': v for k, v in fd_result.items()})
+                            result.update({f'classic_{level_name}_fd_{k}': v for k, v in fd_result.items()})
                             self.log_message(f"  -> {level_name} FD = {fd_result.get('fd', 'N/A'):.3f}")
 
                     except Exception as e:
@@ -1692,7 +1704,7 @@ class IntegratedFeatureExtractorGUI:
                             if not gabor_features: continue
 
                             gabor_result = {k: np.mean(v) for k, v in gabor_features.items()}
-                            result.update({f'gabor_{level_name}_{k}': v for k, v in gabor_result.items()})
+                            result.update({f'classic_{level_name}_gabor_{k}': v for k, v in gabor_result.items()})
                             self.log_message(f"  -> {level_name} 提取了 {len(gabor_result)} 个Gabor特征")
 
                     except Exception as e:
@@ -1735,7 +1747,7 @@ class IntegratedFeatureExtractorGUI:
                             if not hu_features: continue
 
                             hu_result = {k: np.mean(v) for k, v in hu_features.items()}
-                            result.update({f'hu_{level_name}_{k}': v for k, v in hu_result.items()})
+                            result.update({f'classic_{level_name}_hu_{k}': v for k, v in hu_result.items()})
                             self.log_message(f"  -> {level_name} 提取了 {len(hu_result)} 个Hu矩特征")
 
                     except Exception as e:
@@ -1780,7 +1792,7 @@ class IntegratedFeatureExtractorGUI:
                             if not texture_features: continue
 
                             texture_result = {k: np.mean(v) for k, v in texture_features.items()}
-                            result.update({f'texture_{level_name}_{k}': v for k, v in texture_result.items()})
+                            result.update({f'classic_{level_name}_texture_{k}': v for k, v in texture_result.items()})
                             self.log_message(f"  -> {level_name} 提取了 {len(texture_result)} 个扩展纹理特征")
 
                     except Exception as e:
@@ -1809,7 +1821,7 @@ class IntegratedFeatureExtractorGUI:
                                     )
                                     
                                     for key, value in dscr_result.items():
-                                        result[f'dscr_{level_name}_{key}'] = value
+                                        result[f'classic_{level_name}_dscr_{key}'] = value
                                     
                                     self.log_message(f"  -> {level_name} DSCR = {dscr_result.get('dscr', 'N/A'):.1f}%")
                             
@@ -1818,420 +1830,75 @@ class IntegratedFeatureExtractorGUI:
                         result['dscr_error'] = str(e)
                 
                 result['status'] = 'success'
-                results = {'results': [result]}
+                return result
 
-            else:
-                input_dir = self.input_path.get()
-                mask_dir = self.mask_path.get()
-                
-                if not input_dir or not mask_dir:
-                    raise ValueError("请选择输入文件夹和掩码文件夹")
-                
-                self.log_message("开始批量处理...")
-                
-                batch_results = []
-                
-                for idx, (case_id, image_path, mask_path, rel_path) in enumerate(matched_pairs):
-                    self.log_message(f"\n处理病例 {idx+1}/{len(matched_pairs)}: {case_id}")
-
-                    try:
-                        self.log_message("加载图像和掩码...")
-
-                        image, mask = self.image_io.load_image_and_mask(image_path, mask_path)
-
-                        spacing = list(image.GetSpacing())[::-1]
-                        self.log_message(f"图像间距: {spacing}")
-
-                        image_array = self.image_io.sitk_to_numpy(image)
-                        mask_array = self.image_io.sitk_to_numpy(mask)
-
-
-                        result = {
-                            'case_id': case_id,
-                            'image_path': image_path,
-                            'mask_path': mask_path,
-                            'relative_path': rel_path
-                        }
-
-                        image_slices = self._extract_middle_slices(
-                            image_array, self.config.NUM_SLICES, self.config.SLICE_AXIS
-                        )
-                        mask_slices = self._extract_middle_slices(
-                            mask_array, self.config.NUM_SLICES, self.config.SLICE_AXIS
-                        )
-
-                        roi_masks = []
-                        for mask_slice in mask_slices:
-                            roi_mask = (mask_slice > 0).astype(np.uint8)
-                            roi_masks.append(roi_mask)
-
-                        if not any(np.any(mask) for mask in roi_masks):
-                            self.log_message("⚠️ 没有找到有效的ROI区域")
-                            result['status'] = 'no_roi_found'
-                            return {'results': [result]}
-
-                        csf_masks = []
-                        if self.enable_other_asi.get() or self.enable_other_t2si.get():
-                            csf_label = self.dural_sac_label.get()
-                            for mask_slice in mask_slices:
-                                csf_mask = (mask_slice == csf_label).astype(np.uint8)
-                                csf_masks.append(csf_mask)
-
-                            if not any(np.any(mask) for mask in csf_masks):
-                                self.log_message("⚠️ 没有找到CSF区域，ASI/T2SI将使用全局标准化")
-                                csf_masks = None
-
-                        if self.enable_other_dhi.get():
-                            try:
-                                self.log_message("计算DHI...")
-                                
-                                dhi_results_all_levels = []
-                                
-                                for level_name, labels in self.config.DISC_LABELS.items():
-                                    self.log_message(f"处理{level_name}层级")
-                                    
-                                    upper_masks = []
-                                    disc_masks_level = []
-                                    lower_masks = []
-                                    
-                                    for mask_slice in mask_slices:
-                                        upper_mask = (mask_slice == labels['upper']).astype(np.uint8)
-                                        upper_masks.append(upper_mask)
-                                        
-                                        disc_mask = (mask_slice == labels['disc']).astype(np.uint8)
-                                        disc_masks_level.append(disc_mask)
-                                        
-                                        lower_mask = (mask_slice == labels['lower']).astype(np.uint8)
-                                        lower_masks.append(lower_mask)
-                                    
-                                    if not any(np.any(mask) for mask in disc_masks_level):
-                                        self.log_message(f"{level_name}层级没有找到椎间盘区域，跳过")
-                                        continue
-                                        
-                                    is_l5_s1 = (level_name == 'L5-S1')
-                                    dhi_result = self.dhi_calculator.process_multi_slice(
-                                        upper_masks, disc_masks_level, lower_masks, is_l5_s1
-                                    )
-                                    
-                                    for key, value in dhi_result.items():
-                                        result[f'dhi_{level_name}_{key}'] = value
-                                    
-                                    self.log_message(f"{level_name} DHI = {dhi_result.get('dhi', 'N/A'):.3f}")
-                                    dhi_results_all_levels.append(dhi_result)
-                                
-                                if dhi_results_all_levels:
-                                    avg_dhi = np.mean([r['dhi'] for r in dhi_results_all_levels])
-                                    result['dhi_average'] = avg_dhi
-                                    self.log_message(f"平均DHI = {avg_dhi:.3f}")
-                                
-                            except Exception as e:
-                                self.log_message(f"❌ DHI计算失败: {str(e)}")
-                                result['dhi_error'] = str(e)
-
-                        processed_image_slices_for_si = None
-                        processed_mask_slices_for_si = None
-
-                        if self.enable_other_asi.get() or self.enable_other_t2si.get():
-
-                            processed_image_slices_for_si = []
-                            processed_mask_slices_for_si = []
-                            
-                            for i, img_slice in enumerate(image_slices):
-                                slice_spacing = spacing[:2] + [1.0]
-                                
-                                processed_img, processed_mask = self.preprocessor.preprocess_for_signal_intensity(
-                                    img_slice, mask_slices[i], slice_spacing
-                                )
-                                unique_labels = np.unique(processed_mask)
-
-
-                                processed_image_slices_for_si.append(processed_img)
-                                processed_mask_slices_for_si.append(processed_mask.astype(np.int32))
-
-
-                        if self.enable_other_asi.get() and processed_image_slices_for_si:
-                            self.log_message("计算ASI...")
-                            for level_name, labels in self.config.DISC_LABELS.items():
-                                disc_masks_level = [(p_mask.astype(np.int32) == int(labels['disc'])).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
-                                
-                                if not any(np.any(mask) for mask in disc_masks_level):
-                                    continue
-                                    
-                                csf_label = self.dural_sac_label.get()
-                                csf_label_int = int(csf_label)
-                                csf_masks_level = [(p_mask.astype(np.int32) == csf_label_int).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
-                                
-                                try:
-                                    self.log_message(f"  -> 处理 {level_name} ASI...")
-                                    asi_result = self.asi_calculator.process_multi_slice(
-                                        processed_image_slices_for_si, disc_masks_level, csf_masks_level
-                                    )
-                                    result.update({f'asi_{level_name}_{k}': v for k, v in asi_result.items()})
-                                    self.log_message(f"  -> {level_name} ASI = {asi_result.get('asi', 'N/A'):3f}")
-                                except Exception as e:
-                                    self.log_message(f"❌ {level_name} ASI计算失败: {str(e)}")
-                                    result[f'asi_{level_name}_error'] = str(e)
-
-                        if self.enable_other_t2si.get() and processed_image_slices_for_si:
-                            self.log_message("计算T2信号强度...")
-                            for level_name, labels in self.config.DISC_LABELS.items():
-                                disc_masks_level = [(p_mask.astype(np.int32) == int(labels['disc'])).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
-                                
-                                if not any(np.any(mask) for mask in disc_masks_level):
-                                    continue
-                                    
-                                csf_label = self.dural_sac_label.get()
-                                csf_label_int = int(csf_label)
-                                csf_masks_level = [(p_mask.astype(np.int32) == csf_label_int).astype(np.uint8) for p_mask in processed_mask_slices_for_si]
-                                
-                                try:
-                                    self.log_message(f"  -> 处理 {level_name} T2SI...")
-                                    t2si_result = self.t2si_calculator.process_multi_slice(
-                                        processed_image_slices_for_si, 
-                                        disc_masks_level,
-                                        csf_masks_level
-                                    )
-
-                                    serializable_t2si_result = {k: v for k, v in t2si_result.items() if k != 'slice_results'}
-                                    result.update({f't2si_{level_name}_{k}': v for k, v in serializable_t2si_result.items()})
-                                    self.log_message(f"  -> {level_name} T2SI比率 = {t2si_result.get('si_ratio', 'N/A'):.3f}")
-                                except Exception as e:
-                                    self.log_message(f"❌ {level_name} T2SI计算失败: {str(e)}")
-                                    result[f't2si_{level_name}_error'] = str(e)
-                        
-                        if self.enable_other_fd.get():
-                            try:
-                                self.log_message("计算分形维度...")
-                                for level_name, labels in self.config.DISC_LABELS.items():
-                                    self.log_message(f"  -> 处理 {level_name} FD...")
-
-                                    disc_masks_level = []
-                                    for mask_slice in mask_slices:
-                                        disc_mask = (mask_slice == labels['disc']).astype(np.uint8)
-                                        disc_masks_level.append(disc_mask)
-                                    
-                                    if not any(np.any(mask) for mask in disc_masks_level):
-                                        self.log_message(f"  -> 在 {level_name} 未找到掩码，跳过")
-                                        continue
-
-                                    fd_slices = []
-                                    fd_masks = []
-                                    
-                                    for i, img_slice in enumerate(image_slices):
-                                        slice_spacing = spacing[:2] + [1.0]
-                                        edges, processed_mask = self.preprocessor.preprocess_for_fractal(
-                                            img_slice, disc_masks_level[i], slice_spacing
-                                        )
-                                        fd_slices.append(edges)
-                                        fd_masks.append(processed_mask)
-                                    
-                                    fd_result = self.fd_calculator.process_multi_slice(
-                                        fd_slices, fd_masks
-                                    )
-                                    result.update({f'fd_{level_name}_{k}': v for k, v in fd_result.items()})
-                                    self.log_message(f"  -> {level_name} FD = {fd_result.get('fd', 'N/A'):.3f}")
-
-                            except Exception as e:
-                                self.log_message(f"❌ FD计算失败: {str(e)}")
-                                result['fd_error'] = str(e)
-
-                        if self.enable_other_gabor.get():
-                            try:
-                                self.log_message("计算Gabor特征...")
-                                for level_name, labels in self.config.DISC_LABELS.items():
-                                    self.log_message(f"  -> 处理 {level_name} Gabor...")
-
-                                    disc_masks_level = []
-                                    for mask_slice in mask_slices:
-                                        disc_mask = (mask_slice == labels['disc']).astype(np.uint8)
-                                        disc_masks_level.append(disc_mask)
-
-                                    if not any(np.any(mask) for mask in disc_masks_level):
-                                        self.log_message(f"  -> 在 {level_name} 未找到掩码，跳过")
-                                        continue
-
-                                    gabor_slices_level = []
-                                    gabor_masks_level = []
-
-                                    for i, img_slice in enumerate(image_slices):
-                                        slice_spacing = spacing[:2] + [1.0]
-                                        processed_img, processed_mask = self.preprocessor.preprocess_for_texture(
-                                            img_slice, disc_masks_level[i], slice_spacing
-                                        )
-                                        gabor_slices_level.append(processed_img)
-                                        gabor_masks_level.append(processed_mask)
-
-                                    gabor_features = {}
-                                    for i, (img, mask) in enumerate(zip(gabor_slices_level, gabor_masks_level)):
-                                        if not np.any(mask): continue 
-                                        slice_features = self.gabor_calculator.calculate(img, mask)
-                                        for k, v in slice_features.items():
-                                            if k in gabor_features:
-                                                gabor_features[k].append(v)
-                                            else:
-                                                gabor_features[k] = [v]
-
-                                    if not gabor_features: continue
-
-                                    gabor_result = {k: np.mean(v) for k, v in gabor_features.items()}
-                                    result.update({f'gabor_{level_name}_{k}': v for k, v in gabor_result.items()})
-                                    self.log_message(f"  -> {level_name} 提取了 {len(gabor_result)} 个Gabor特征")
-
-                            except Exception as e:
-                                self.log_message(f"❌ Gabor计算失败: {str(e)}")
-                                result['gabor_error'] = str(e)
-
-                        if self.enable_other_hu.get():
-                            try:
-                                self.log_message("计算Hu不变矩...")
-                                for level_name, labels in self.config.DISC_LABELS.items():
-                                    self.log_message(f"  -> 处理 {level_name} Hu矩...")
-
-                                    disc_masks_level = []
-                                    for mask_slice in mask_slices:
-                                        disc_mask = (mask_slice == labels['disc']).astype(np.uint8)
-                                        disc_masks_level.append(disc_mask)
-
-                                    if not any(np.any(mask) for mask in disc_masks_level):
-                                        self.log_message(f"  -> 在 {level_name} 未找到掩码，跳过")
-                                        continue
-
-                                    hu_masks_level = []
-                                    for roi_mask in disc_masks_level:
-                                        slice_spacing = spacing[:2] + [1.0]
-                                        binary_mask = self.preprocessor.preprocess_for_shape(
-                                            roi_mask, slice_spacing
-                                        )
-                                        hu_masks_level.append(binary_mask)
-
-                                    hu_features = {}
-                                    for i, mask in enumerate(hu_masks_level):
-                                        if not np.any(mask): continue
-                                        slice_features = self.hu_calculator.calculate(mask, mask)
-                                        for k, v in slice_features.items():
-                                            if k in hu_features:
-                                                hu_features[k].append(v)
-                                            else:
-                                                hu_features[k] = [v]
-                                    
-                                    if not hu_features: continue
-
-                                    hu_result = {k: np.mean(v) for k, v in hu_features.items()}
-                                    result.update({f'hu_{level_name}_{k}': v for k, v in hu_result.items()})
-                                    self.log_message(f"  -> {level_name} 提取了 {len(hu_result)} 个Hu矩特征")
-
-                            except Exception as e:
-                                self.log_message(f"❌ Hu矩计算失败: {str(e)}")
-                                result['hu_error'] = str(e)
-
-
-                        if self.enable_other_texture.get():
-                            try:
-                                self.log_message("计算扩展纹理特征...")
-                                for level_name, labels in self.config.DISC_LABELS.items():
-                                    self.log_message(f"  -> 处理 {level_name} 扩展纹理...")
-
-                                    disc_masks_level = []
-                                    for mask_slice in mask_slices:
-                                        disc_mask = (mask_slice == labels['disc']).astype(np.uint8)
-                                        disc_masks_level.append(disc_mask)
-
-                                    if not any(np.any(mask) for mask in disc_masks_level):
-                                        self.log_message(f"  -> 在 {level_name} 未找到掩码，跳过")
-                                        continue
-
-                                    texture_slices_level = []
-                                    texture_masks_level = []
-                                    for i, img_slice in enumerate(image_slices):
-                                        slice_spacing = spacing[:2] + [1.0]
-                                        processed_img, processed_mask = self.preprocessor.preprocess_for_texture(
-                                            img_slice, disc_masks_level[i], slice_spacing
-                                        )
-                                        texture_slices_level.append(processed_img)
-                                        texture_masks_level.append(processed_mask)
-
-                                    texture_features = {}
-                                    for i, (img, mask) in enumerate(zip(texture_slices_level, texture_masks_level)):
-                                        if not np.any(mask): continue
-                                        slice_features = self.texture_calculator.calculate(img, mask)
-                                        for k, v in slice_features.items():
-                                            if k in texture_features:
-                                                texture_features[k].append(v)
-                                            else:
-                                                texture_features[k] = [v]
-                                    
-                                    if not texture_features: continue
-
-                                    texture_result = {k: np.mean(v) for k, v in texture_features.items()}
-                                    result.update({f'texture_{level_name}_{k}': v for k, v in texture_result.items()})
-                                    self.log_message(f"  -> {level_name} 提取了 {len(texture_result)} 个扩展纹理特征")
-
-                            except Exception as e:
-                                self.log_message(f"❌ 扩展纹理特征计算失败: {str(e)}")
-                                result['texture_error'] = str(e)
-
-                        if self.enable_other_dscr.get():
-                            try:
-                                self.log_message("计算椎管狭窄率DSCR...")
-                                
-                                dural_sac_label_val = self.dural_sac_label.get()
-                                dural_sac_masks = [(s == dural_sac_label_val).astype(np.uint8) for s in mask_slices]
-
-                                if not any(np.any(mask) for mask in dural_sac_masks):
-                                    self.log_message("⚠️ [DSCR错误] 没有找到有效的硬脊膜囊区域，无法自动计算DSCR。")
-                                    result['dscr_note'] = "DSCR自动计算需要有效的硬脊膜囊标注"
-                                else:
-                                    for level_name in self.config.DISC_LABELS.keys():
-                                        disc_label_val = self.config.DISC_LABELS[level_name]['disc']
-                                        disc_masks_for_dscr = [(s == disc_label_val).astype(np.uint8) for s in mask_slices]
-                                        
-                                        if any(np.any(mask) for mask in disc_masks_for_dscr):
-                                            dscr_result = self.dscr_calculator.process_multi_slice(
-                                                disc_masks_for_dscr, dural_sac_masks, mask_slices, level_name
-                                            )
-                                            
-                                            for key, value in dscr_result.items():
-                                                result[f'dscr_{level_name}_{key}'] = value
-                                            
-                                            self.log_message(f"  -> {level_name} DSCR = {dscr_result.get('dscr', 'N/A'):.1f}%")
-                                    
-                            except Exception as e:
-                                self.log_message(f"❌ DSCR计算失败: {str(e)}")
-                                result['dscr_error'] = str(e)
-
-                        
-                        result['status'] = 'success'
-                        batch_results.append(result)
-
-                    except Exception as e:
-                        self.log_message(f"❌ 处理失败: {str(e)}")
-                        batch_results.append({
-                            'case_id': case_id,
-                            'status': 'failed',
-                            'error': str(e),
-                            'relative_path': rel_path
-                        })
-                
-                results = {
-                    'batch_mode': True,
-                    'total_cases': len(matched_pairs),
-                    'results': batch_results
+            except Exception as e:
+                self.log_message(f"  > ❌ 处理病例 {case_id} 时发生严重错误: {str(e)}")
+                import traceback
+                self.log_message(traceback.format_exc())
+                return {
+                    'case_id': case_id,
+                    'status': 'failed',
+                    'error': str(e)
                 }
+    
+    def extract_other_features(self, matched_pairs=None):
+            results = {}
             
-            return results
-            
-        except Exception as e:
-            self.log_message(f"❌ 特征提取失败: {str(e)}")
-            import traceback
-            self.log_message(traceback.format_exc())
-            return {'error': str(e)}
+            try:
+                if self.input_type.get() == "single":
+                    image_path = self.input_path.get()
+                    mask_path = self.mask_path.get()
+                    
+                    if not image_path or not mask_path:
+                        raise ValueError("请选择图像和掩码文件")
+                    
+                    p = Path(image_path)
+                    base_name = p.name
+                    while Path(base_name).suffix:
+                        base_name = Path(base_name).stem
+                    case_id = base_name
+
+                    single_result = self._process_single_case_other_features(image_path, mask_path, case_id)
+                    results = {'results': [single_result]}
+
+                else:
+                    input_dir = self.input_path.get()
+                    mask_dir = self.mask_path.get()
+                    
+                    if not input_dir or not mask_dir:
+                        raise ValueError("请选择输入文件夹和掩码文件夹")
+                    
+                    self.log_message("开始批量处理...")
+                    
+                    batch_results = []
+                    for idx, (case_id, image_path, mask_path, rel_path) in enumerate(matched_pairs):
+                        self.log_message(f"\n处理病例 {idx+1}/{len(matched_pairs)}: {case_id}")
+                        
+                        case_result = self._process_single_case_other_features(image_path, mask_path, case_id)
+                        case_result['relative_path'] = rel_path
+                        batch_results.append(case_result)
+                    
+                    results = {
+                        'batch_mode': True,
+                        'total_cases': len(matched_pairs),
+                        'results': batch_results
+                    }
+                
+                return results
+                
+            except Exception as e:
+                self.log_message(f"❌ 特征提取主流程失败: {str(e)}")
+                import traceback
+                self.log_message(traceback.format_exc())
+                return {'error': str(e)}
         
     def run_extraction(self):
         try:
             self.log_message("🚀 开始特征提取...")
             
             source = self.feature_type.get()
-            all_results = []
+            all_results_df = pd.DataFrame()
             matched_pairs = None
 
             if self.input_type.get() == "batch":
@@ -2251,37 +1918,33 @@ class IntegratedFeatureExtractorGUI:
                 self.log_message(f"成功匹配 {len(matched_pairs)} 对文件。")
 
             if source in ["other", "both"]:
-                self.log_message(self.get_text('processing_other'))
+                self.log_message("🔄 处理经典特征...")
                 other_results = self.extract_other_features(matched_pairs)
-                
-                if 'error' in other_results:
-                    self.log_message(f"❌ 自定义特征提取失败: {other_results['error']}")
-                    if source == "other": 
-                        messagebox.showerror("错误", f"特征提取失败: {other_results['error']}")
-                        return
-                elif 'results' in other_results:
-                    all_results.extend(other_results['results'])
-                    self.log_message(self.get_text('other_complete'))
+                if 'results' in other_results and other_results['results']:
+                    df_other = pd.DataFrame(other_results['results'])
+                    all_results_df = pd.merge(all_results_df, df_other, on='case_id', how='outer') if not all_results_df.empty else df_other
+                self.log_message("✅ 经典特征提取完成")
 
             if source in ["pyradiomics", "both"] and PYRADIOMICS_AVAILABLE:
                 self.log_message("🔄 处理PyRadiomics特征...")
                 pyrad_results = self.extract_pyradiomics_features(matched_pairs)
-                
-                if 'error' in pyrad_results:
-                    self.log_message(f"❌ PyRadiomics特征提取失败: {pyrad_results['error']}")
-                    if source == "pyradiomics":  
-                        messagebox.showerror("错误", f"特征提取失败: {pyrad_results['error']}")
-                        return
-                elif 'results' in pyrad_results:
-                    if source == "both" and all_results:
-                        self._merge_results(all_results, pyrad_results['results'])
-                    else:
-                        all_results.extend(pyrad_results['results'])
-                    self.log_message("✅ PyRadiomics特征提取完成")
+                if 'results' in pyrad_results and pyrad_results['results']:
+                    df_pyrad = pd.DataFrame(pyrad_results['results'])
+                    all_results_df = pd.merge(all_results_df, df_pyrad, on='case_id', how='outer') if not all_results_df.empty else df_pyrad
+                self.log_message("✅ PyRadiomics特征提取完成")
 
-            if all_results:
+            if source in ["deep", "both"]:
+                self.log_message("🔄 处理深度学习特征...")
+                deep_results = self.extract_deep_features(matched_pairs)
+                if 'results' in deep_results and deep_results['results']:
+                    df_deep = pd.DataFrame(deep_results['results'])
+                    all_results_df = pd.merge(all_results_df, df_deep, on='case_id', how='outer') if not all_results_df.empty else df_deep
+                self.log_message("✅ 深度学习特征提取完成")
+            
+            if not all_results_df.empty:
+                final_results_list = all_results_df.to_dict('records')
                 is_batch = self.input_type.get() == "batch"
-                self.save_results({'results': all_results, 'batch_mode': is_batch, 'total_cases': len(all_results)})
+                self.save_results({'results': final_results_list, 'batch_mode': is_batch, 'total_cases': len(final_results_list)})
                 self.log_message("🎉 所有特征提取完成！")
             else:
                 self.log_message("⚠️ 没有提取到任何特征")
@@ -2532,161 +2195,90 @@ class IntegratedFeatureExtractorGUI:
         }
         
         return result
-    
+
+
     def extract_pyradiomics_features(self, matched_pairs=None):
         if not PYRADIOMICS_AVAILABLE:
             self.log_message("❌ PyRadiomics不可用")
             return {'error': 'PyRadiomics not available'}
         
-        results = {}
-        
         try:
+            params = self._create_pyradiomics_params()
+            extractor = featureextractor.RadiomicsFeatureExtractor(**params)
+            self._configure_extractor(extractor)
+            
+            all_cases_results = []
+
             if self.input_type.get() == "single":
                 image_path = self.input_path.get()
                 mask_path = self.mask_path.get()
-                
                 if not image_path or not mask_path:
                     raise ValueError("请选择图像和掩码文件")
                 
-                self.log_message("初始化PyRadiomics...")
-
-                params = self._create_pyradiomics_params()
-
-                extractor = featureextractor.RadiomicsFeatureExtractor(**params)
-
-                if self.enable_shape.get():
-                    extractor.enableFeatureClassByName('shape')
-                if self.enable_shape2d.get():
-                    extractor.enableFeatureClassByName('shape2D')
-                if self.enable_firstorder.get():
-                    extractor.enableFeatureClassByName('firstorder')
-                if self.enable_glcm.get():
-                    extractor.enableFeatureClassByName('glcm')
-                if self.enable_glrlm.get():
-                    extractor.enableFeatureClassByName('glrlm')
-                if self.enable_glszm.get():
-                    extractor.enableFeatureClassByName('glszm')
-                if self.enable_gldm.get():
-                    extractor.enableFeatureClassByName('gldm')
-                if self.enable_ngtdm.get():
-                    extractor.enableFeatureClassByName('ngtdm')
-
-                if self.enable_log.get():
-                    extractor.enableImageTypeByName('LoG')
-
-                if self.enable_wavelet.get():
-                    extractor.enableImageTypeByName('Wavelet')
-                
-                if self.enable_square.get():
-                    extractor.enableImageTypeByName('Square')
-                if self.enable_square_root.get():
-                    extractor.enableImageTypeByName('SquareRoot')
-                if self.enable_logarithm.get():
-                    extractor.enableImageTypeByName('Logarithm')
-                if self.enable_exponential.get():
-                    extractor.enableImageTypeByName('Exponential')
-                if self.enable_gradient.get():
-                    extractor.enableImageTypeByName('Gradient')
-                
-                if self.enable_lbp2d.get():
-                    extractor.enableImageTypeByName('LBP2D')
-                
-                if self.enable_lbp3d.get():
-                    extractor.enableImageTypeByName('LBP3D')
-                
-                self.log_message("提取PyRadiomics特征...")
-
-                feature_vector = extractor.execute(image_path, mask_path, label=self.label.get())
-
-                pyrad_features = {}
-                diagnostics = {}
-                
-                for key, value in feature_vector.items():
-                    if key.startswith('diagnostics_'):
-                        if self.additional_info.get():
-                            diagnostics[key] = value
-                    elif not key.startswith('general_info_'):
-                        if isinstance(value, (np.ndarray, np.generic)):
-                            value = value.tolist() if isinstance(value, np.ndarray) else value.item()
-                        pyrad_features[key] = value
-
                 p = Path(image_path)
-                base_name = p.name
-                while Path(base_name).suffix:
-                    base_name = Path(base_name).stem
-                case_id = base_name
+                case_id = p.stem.split('.')[0]
+                self.log_message(f"处理单个病例: {case_id}")
                 
-                result = {
-                    'case_id': case_id,
-                    'image_path': image_path,
-                    'mask_path': mask_path,
-                    'num_features': len(pyrad_features),
-                    'status': 'success'
-                }
-                result.update(pyrad_features)
-                
-                if self.additional_info.get():
-                    result['diagnostics'] = diagnostics
-                
-                self.log_message(f"✅ 成功提取 {len(pyrad_features)} 个PyRadiomics特征")
-                
-                results = {'results': [result]}
-                
-            else: 
-                input_dir = self.input_path.get()
-                mask_dir = self.mask_path.get()
-                
-                if not input_dir or not mask_dir:
-                    raise ValueError("请选择输入文件夹和掩码文件夹")
-                
-                self.log_message("开始PyRadiomics批量处理...")
+                patient_all_disc_features = {'case_id': case_id}
+                total_features_count = 0
 
-                params = self._create_pyradiomics_params()
-                extractor = featureextractor.RadiomicsFeatureExtractor(**params)
-                self._configure_extractor(extractor)
-                
-                batch_results = []
-                
-                for idx, (case_id, image_path, mask_path, rel_path) in enumerate(matched_pairs):
-                    self.log_message(f"\n处理病例 {idx+1}/{len(matched_pairs)}: {case_id}")
+                for disc_name, labels in self.config.DISC_LABELS.items():
+                    disc_label = labels['disc']
+                    self.log_message(f"  -> 提取 {disc_name}的PyRadiomics特征...")
                     
                     try:
-                        feature_vector = extractor.execute(image_path, mask_path, label=self.label.get())
-
-                        pyrad_features = {}
+                        feature_vector = extractor.execute(image_path, mask_path, label=disc_label)
+                        
+                        disc_features = {}
                         for key, value in feature_vector.items():
                             if not key.startswith('diagnostics_') and not key.startswith('general_info_'):
                                 if isinstance(value, (np.ndarray, np.generic)):
-                                    value = value.tolist() if isinstance(value, np.ndarray) else value.item()
-                                pyrad_features[key] = value
+                                    value = value.item()
+                                new_key = f"PyRadiomics_{disc_name}_{key}"
+                                disc_features[new_key] = value
                         
-                        result = {
-                            'case_id': case_id,
-                            'status': 'success',
-                            'num_features': len(pyrad_features),
-                            'relative_path': rel_path
-                        }
-                        result.update(pyrad_features)
-                        
-                        batch_results.append(result)
-                        self.log_message(f"✅ 成功提取 {len(pyrad_features)} 个PyRadiomics特征")
-                        
+                        patient_all_disc_features.update(disc_features)
+                        total_features_count += len(disc_features)
+                        self.log_message(f"    - 成功提取 {len(disc_features)} 个特征")
                     except Exception as e:
-                        self.log_message(f"❌ 处理失败: {str(e)}")
-                        batch_results.append({
-                            'case_id': case_id,
-                            'status': 'failed',
-                            'error': str(e),
-                            'relative_path': rel_path
-                        })
+                        self.log_message(f"    - 警告: 提取 {disc_name} 失败: {e}. 将跳过此椎间盘。")
                 
-                results = {
-                    'batch_mode': True,
-                    'total_cases': len(matched_pairs),
-                    'results': batch_results
-                }
-            
-            return results
+                patient_all_disc_features['num_pyradiomics_features'] = total_features_count
+                all_cases_results.append(patient_all_disc_features)
+
+            else:
+                if not matched_pairs:
+                    raise ValueError("批量模式下缺少匹配的文件对")
+                    
+                for idx, (case_id, image_path, mask_path, rel_path) in enumerate(matched_pairs):
+                    self.log_message(f"\n处理病例 {idx+1}/{len(matched_pairs)}: {case_id}")
+                    patient_all_disc_features = {'case_id': case_id}
+                    total_features_count = 0
+
+                    for disc_name, labels in self.config.DISC_LABELS.items():
+                        disc_label = labels['disc']
+                        self.log_message(f"  -> 提取 {disc_name}的PyRadiomics特征...")
+                        try:
+                            feature_vector = extractor.execute(image_path, mask_path, label=disc_label)
+                            
+                            disc_features = {}
+                            for key, value in feature_vector.items():
+                                if not key.startswith('diagnostics_') and not key.startswith('general_info_'):
+                                    if isinstance(value, (np.ndarray, np.generic)):
+                                        value = value.item()
+                                    new_key = f"PyRadiomics_{disc_name}_{key}"
+                                    disc_features[new_key] = value
+                            
+                            patient_all_disc_features.update(disc_features)
+                            total_features_count += len(disc_features)
+                            self.log_message(f"    - 成功提取 {len(disc_features)} 个特征")
+                        except Exception as e:
+                            self.log_message(f"    - 警告: 提取 {disc_name} 失败: {e}. 将跳过此椎间盘。")
+                    
+                    patient_all_disc_features['num_pyradiomics_features'] = total_features_count
+                    all_cases_results.append(patient_all_disc_features)
+
+            return {'results': all_cases_results}
             
         except Exception as e:
             self.log_message(f"❌ PyRadiomics特征提取失败: {str(e)}")
@@ -2694,7 +2286,44 @@ class IntegratedFeatureExtractorGUI:
             self.log_message(traceback.format_exc())
             return {'error': str(e)}
 
+        
+    def extract_deep_features(self, matched_pairs=None):
+        results_list = []
+        
+        model_size = self.deep_model_size.get()
+        agg_strategy = self.deep_agg_strategy.get()
+        padding_ratio = self.deep_padding_ratio.get()
+
+        if self.input_type.get() == "single":
+            image_path = self.input_path.get()
+            mask_path = self.mask_path.get()
+            if not image_path or not mask_path:
+                self.log_message("错误: 单文件模式下需要图像和掩码文件。")
+                return {'error': '缺少文件'}
+            
+            self.log_message(f"处理单个病例: {os.path.basename(image_path)}")
+            case_result = deep_features_core.extract_deep_features_for_case(
+                image_path, mask_path, self.config, model_size, agg_strategy, padding_ratio, self.log_message
+            )
+            if case_result:
+                results_list.append(case_result)
+        else:
+            if not matched_pairs:
+                self.log_message("错误: 批量模式需要匹配的文件对。")
+                return {'error': '缺少匹配文件'}
+                
+            for idx, (case_id, image_path, mask_path, rel_path) in enumerate(matched_pairs):
+                self.log_message(f"\n处理病例 {idx+1}/{len(matched_pairs)}: {case_id}")
+                case_result = deep_features_core.extract_deep_features_for_case(
+                    image_path, mask_path, self.config, model_size, agg_strategy, padding_ratio, self.log_message
+                )
+                if case_result:
+                    results_list.append(case_result)
+
+        return {'results': results_list}
+
     def _create_pyradiomics_params(self):
+            
             params = {
                 'binWidth': self.bin_width.get() if self.bin_width.get() > 0 else None,
                 'binCount': self.bin_count.get() if self.bin_count.get() > 0 else None,
