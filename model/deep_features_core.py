@@ -8,12 +8,26 @@ import cv2
 import pandas as pd
 from scipy.ndimage import center_of_mass
 from torchvision import transforms
+import urllib.request
+from tqdm import tqdm
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
+MODEL_URLS = {
+    "base": "https://huggingface.co/Snarcy/RadioDino-b16/resolve/main/pytorch_model.bin?download=true",
+    "small": "https://huggingface.co/Snarcy/RadioDino-s16/resolve/main/pytorch_model.bin?download=true"
+}
+
+class TqdmUpTo(tqdm):
+
+    def update_to(self, b=1, bsize=1, tsize=None):
+
+        if tsize is not None:
+            self.total = tsize
+        self.update(b * bsize - self.n)
+
 
 def preprocess_slice(image_slice_2d, mask_slice_2d, view_name, case_id, padding_ratio):
-
     if image_slice_2d.max() > 0:
         img_normalized_8bit = cv2.normalize(image_slice_2d, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
     else:
@@ -53,7 +67,6 @@ def preprocess_slice(image_slice_2d, mask_slice_2d, view_name, case_id, padding_
     return image_tensor, resized_mask
 
 def get_feature_vector_from_slice(model, image_tensor, mask_224, device, aggregation_strategy):
-
     model.eval()
     with torch.no_grad():
         intermediate_output = model.get_intermediate_layers(image_tensor.to(device), n=1)[0]
@@ -154,7 +167,41 @@ def extract_disc_features(image_3d, mask_3d, disc_label, disc_name, model, devic
     
     return final_disc_vector, feature_names
 
-def load_deep_model(model_size, device):
+def download_model_if_needed(model_size, logger_callback=print):
+
+    url = MODEL_URLS.get(model_size)
+    if not url:
+        logger_callback(f"!!! 错误: 未找到模型大小 '{model_size}' 的下载链接。")
+        return False
+
+    model_dir = os.path.join("./model", model_size)
+    weights_path = os.path.join(model_dir, "pytorch_model.bin")
+
+    if os.path.exists(weights_path):
+        return True
+
+    try:
+        os.makedirs(model_dir, exist_ok=True)
+    except OSError as e:
+        logger_callback(f"!!! 错误: 创建文件夹 {model_dir} 失败: {e}")
+        return False
+
+    try:
+        with TqdmUpTo(unit='B', unit_scale=True, unit_divisor=1024, miniters=1,
+                      desc=f"下载 {model_size} 模型") as t:
+            urllib.request.urlretrieve(url, filename=weights_path, reporthook=t.update_to)
+        logger_callback(f"✓ 模型 {model_size} 下载完成")
+        return True
+    except Exception as e:
+        logger_callback(f"!!! 错误: 下载模型 {model_size} 失败: {e}")
+        if os.path.exists(weights_path):
+            os.remove(weights_path)
+        return False
+
+def load_deep_model(model_size, device, logger_callback=print):
+    success = download_model_if_needed(model_size, logger_callback)
+    if not success:
+        raise FileNotFoundError(f"无法下载或找到模型 '{model_size}' 的权重文件。请检查网络连接或手动下载。")
 
     if model_size == "small":
         model_architecture = 'vit_small_patch16_224'
@@ -176,12 +223,11 @@ def load_deep_model(model_size, device):
     return model
 
 def extract_deep_features_for_case(image_path, mask_path, config, model_size, agg_strategy, padding_ratio, logger_callback=print):
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger_callback(f"使用设备: {device} 加载 {model_size} 模型...")
     
     try:
-        model = load_deep_model(model_size, device)
+        model = load_deep_model(model_size, device, logger_callback)
     except Exception as e:
         logger_callback(f"错误: 无法加载深度学习模型: {e}")
         return None
