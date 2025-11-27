@@ -11,8 +11,8 @@ class Config:
 
 
     DURAL_SAC_LABEL = 20  
-
     
+
     DSCR_PARAMS = {
         'spline_smoothing': 0, 
         'spline_degree': 2,     
@@ -57,6 +57,39 @@ class Config:
     TEXTURE_PARAMS = {
         'lbp_radius': 1,
         'lbp_n_points': 8,
+    }
+
+    TENSOR_ROI_PARAMS = {
+        'roi_size': [72, 40, 64],
+        'target_spacing_mm': 1.0,
+        'q_low': 1,
+        'q_high': 99,
+    }
+
+    TENSOR_TUCKER_PARAMS = {
+        'energy_threshold': 0.95,
+        'k_singular_values': 10
+    }
+
+    TENSOR_PATCH_PARAMS = {
+        'patch_size': 4,
+        'similar_patches': 64,
+        'search_window': 15,
+        'internal_iterations': 50,
+        'epsilon': 1e-16,
+        'alpha_feedback': 0.1,
+        'beta_noise': 0.3,
+        'max_patch_groups': 64,
+        'max_singular_values': 10
+    }
+
+    TENSOR_CP_PARAMS = {
+        'rank': 8,
+        'max_iter': 1000,
+        'tol': 1e-4,
+        'epsilon_cp': 1e-6,
+        'top_components': 3,
+        'random_state': 0
     }
 
     NUM_SLICES = 3 
@@ -132,4 +165,3 @@ class Config:
         'hu': {'enabled': False},   
         'texture': {'enabled': True, 'max_workers': 4}
     }
-
