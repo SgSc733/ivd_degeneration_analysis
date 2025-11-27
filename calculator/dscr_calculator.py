@@ -140,7 +140,7 @@ class DSCRCalculator(BaseCalculator):
         return corners
 
     def _find_vertebra_corners(self, vertebra_mask: np.ndarray) -> Optional[np.ndarray]:
-        """使用 cv2.goodFeaturesToTrack 检测椎体的四个角点。"""
+
         if not np.any(vertebra_mask):
             return None
             
@@ -346,19 +346,29 @@ class DSCRCalculator(BaseCalculator):
             result = self.calculate(disc, sac, full, slice_idx=i, disc_level=disc_level)
             if result and 'dscr' in result and result['dscr'] > 0:
                 all_results.append(result)
-                
+
         if not all_results:
-            return {'dscr': -1, 'error': 'No valid DSCR calculated across slices'}
+            return {
+                'dscr': np.nan,
+                'dscr_std': np.nan,
+                'dscr_max': np.nan,
+                'actual_diameter_pixels': np.nan,
+                'ideal_diameter_pixels': np.nan,
+                'disc_center_y': np.nan,
+                'num_landmarks': np.nan,
+                'num_valid_slices': 0,
+                'error': None,
+            }
 
         dscr_values = [r['dscr'] for r in all_results]
-        
+
         final_result = {
-            'dscr': np.mean(dscr_values),
-            'dscr_std': np.std(dscr_values),
-            'dscr_max': np.max(dscr_values),
-            'num_valid_slices': len(all_results)
+            'dscr': float(np.mean(dscr_values)),
+            'dscr_std': float(np.std(dscr_values)),
+            'dscr_max': float(np.max(dscr_values)),
+            'num_valid_slices': len(all_results),
         }
-        
-        final_result.update({k:v for k,v in all_results[0].items() if k not in final_result})
+
+        final_result.update({k: v for k, v in all_results[0].items() if k not in final_result})
 
         return final_result
