@@ -32,7 +32,15 @@ from calculator import (
     TextureFeaturesCalculator, DSCRCalculator
 )
 from utils import ImageIO, Preprocessor
+from utils.measure_disc_roi_size import estimate_tensor_roi_size
 from config import Config
+from tensor import (
+    GlobalTuckerTensorFeatures,
+    PatchTensorFeatures,
+    CPTensorFeatures,
+    extract_disc_roi_3d,
+    normalize_roi_intensity,
+)
 
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(1)
@@ -75,7 +83,8 @@ LANG_DICT = {
         'feature_type': '特征类型:',
         'pyradiomics_features': 'PyRadiomics特征',
         'other_features_option': '经典特征',
-        'deep_learning_features':'深度学习特征',
+        'deep_learning_features': '深度学习特征',
+        'tensor_features_option': '张量分解特征',
         'all_features': '全部提取',
         'file_selection': '📁 文件选择',
         'process_mode': '处理模式:',
@@ -87,6 +96,31 @@ LANG_DICT = {
         'select': '选择',
         'basic_settings': '🔧 基本设置',
         'parameter_settings': '参数设置',
+        'tensor_roi_settings': '张量ROI设置',
+        'tensor_params_group': '张量分解特征参数',
+        'tensor_tucker_group': '第一类：全局Tucker特征',
+        'tensor_patch_group': '第二类：非局部低秩patch特征',
+        'tensor_cp_group': '第三类：单病例CP特征',
+        'tensor_roi_size': 'ROI尺寸 (Z,Y,X):',
+        'tensor_target_spacing': '目标体素间距(mm):',
+        'tensor_q_low': '强度下分位数(%):',
+        'tensor_q_high': '强度上分位数(%):',
+        'tensor_tucker_eta': '能量阈值 η:',
+        'tensor_tucker_k': '每模奇异值个数 K_n:',
+        'tensor_patch_m': 'Patch尺寸 m:',
+        'tensor_patch_n': '相似块数量 n:',
+        'tensor_patch_s': '搜索窗口 s:',
+        'tensor_patch_T': 'ADMM迭代 T:',
+        'tensor_patch_epsilon': 'ε (log平滑):',
+        'tensor_patch_alpha': '反馈系数 α:',
+        'tensor_patch_beta': '噪声参数 β:',
+        'tensor_patch_max_groups': '最大patch组数:',
+        'tensor_patch_k': '每模奇异值个数 K:',
+        'tensor_cp_rank': 'CP秩 R:',
+        'tensor_cp_max_iter': '最大迭代数:',
+        'tensor_cp_tol': '收敛阈值 tol:',
+        'tensor_cp_k': '前K个主成分 K:',
+        'tensor_cp_epsilon': 'ε (特征平滑):',
         'bin_width': '分箱宽度:',
         'bin_count': '分箱数量:',
         'resample_spacing': '重采样间距:',
@@ -294,7 +328,7 @@ class IntegratedFeatureExtractorGUI:
         self.mask_path = tk.StringVar()
         self.input_type = tk.StringVar(value="batch")
 
-        self.feature_type = tk.StringVar(value="both")
+        self.feature_type = tk.StringVar(value="all")
 
         self.enable_other_dhi = tk.BooleanVar(value=True)
         self.enable_other_asi = tk.BooleanVar(value=True)
@@ -306,6 +340,41 @@ class IntegratedFeatureExtractorGUI:
         self.enable_other_dscr = tk.BooleanVar(value=True) 
         self.dural_sac_label = tk.IntVar(value=20)
 
+        self.enable_tensor_tucker = tk.BooleanVar(value=True)
+        self.enable_tensor_patch = tk.BooleanVar(value=True)
+        self.enable_tensor_cp = tk.BooleanVar(value=True)
+
+        roi_params = self.config.TENSOR_ROI_PARAMS
+        self.tensor_roi_z = tk.IntVar(value=roi_params['roi_size'][0])
+        self.tensor_roi_y = tk.IntVar(value=roi_params['roi_size'][1])
+        self.tensor_roi_x = tk.IntVar(value=roi_params['roi_size'][2])
+        self.tensor_target_spacing = tk.DoubleVar(value=roi_params['target_spacing_mm'])
+        self.tensor_q_low = tk.DoubleVar(value=roi_params['q_low'])
+        self.tensor_q_high = tk.DoubleVar(value=roi_params['q_high'])
+
+        tucker_params = self.config.TENSOR_TUCKER_PARAMS
+        self.tensor_tucker_eta = tk.DoubleVar(value=tucker_params['energy_threshold'])
+        self.tensor_tucker_k = tk.IntVar(value=tucker_params['k_singular_values'])
+
+        patch_params = self.config.TENSOR_PATCH_PARAMS
+        self.tensor_patch_m = tk.IntVar(value=patch_params['patch_size'])
+        self.tensor_patch_n = tk.IntVar(value=patch_params['similar_patches'])
+        self.tensor_patch_s = tk.IntVar(value=patch_params['search_window'])
+        self.tensor_patch_T = tk.IntVar(value=patch_params['internal_iterations'])
+        self.tensor_patch_epsilon = tk.DoubleVar(value=patch_params['epsilon'])
+        self.tensor_patch_alpha = tk.DoubleVar(value=patch_params['alpha_feedback'])
+        self.tensor_patch_beta = tk.DoubleVar(value=patch_params['beta_noise'])
+        self.tensor_patch_max_groups = tk.IntVar(value=patch_params['max_patch_groups'])
+        self.tensor_patch_k = tk.IntVar(value=patch_params['max_singular_values'])
+
+        cp_params = self.config.TENSOR_CP_PARAMS
+        self.tensor_cp_rank = tk.IntVar(value=cp_params['rank'])
+        self.tensor_cp_max_iter = tk.IntVar(value=cp_params['max_iter'])
+        self.tensor_cp_tol = tk.DoubleVar(value=cp_params['tol'])
+        self.tensor_cp_k = tk.IntVar(value=cp_params.get('top_components', 3))
+        self.tensor_cp_epsilon = tk.DoubleVar(value=cp_params.get('epsilon_cp', 1e-8))
+
+        self.tensor_roi_auto = tk.BooleanVar(value=False)
 
         self._init_pyradiomics_variables()
         self._init_deep_features_variables()
@@ -397,7 +466,7 @@ class IntegratedFeatureExtractorGUI:
         self.lbp3d_icosphere_subdivision = tk.IntVar(value=1)
 
         self.enable_shape = tk.BooleanVar(value=True)
-        self.enable_shape2d = tk.BooleanVar(value=True)
+        self.enable_shape2d = tk.BooleanVar(value=False)
         self.enable_firstorder = tk.BooleanVar(value=True)
         self.enable_glcm = tk.BooleanVar(value=True)
         self.enable_glrlm = tk.BooleanVar(value=True)
@@ -406,7 +475,6 @@ class IntegratedFeatureExtractorGUI:
         self.enable_ngtdm = tk.BooleanVar(value=True)
 
     def _init_deep_features_variables(self):
-
         self.deep_model_size = tk.StringVar(value="base")
         self.deep_agg_strategy = tk.StringVar(value="both")
         self.deep_padding_ratio = tk.DoubleVar(value=0.2)
@@ -457,6 +525,8 @@ class IntegratedFeatureExtractorGUI:
                 self.widgets['other_radio'].config(text=self.get_text('other_features_option'))
             if 'deep_radio' in self.widgets:
                 self.widgets['deep_radio'].config(text=self.get_text('deep_learning_features'))
+            if 'tensor_radio' in self.widgets:
+                self.widgets['tensor_radio'].config(text=self.get_text('tensor_features_option'))
             if 'both_radio' in self.widgets:
                 self.widgets['both_radio'].config(text=self.get_text('all_features'))
 
@@ -913,9 +983,15 @@ class IntegratedFeatureExtractorGUI:
                                      command=self._on_feature_type_change)
         deep_radio.pack(side="left", padx=10)
         self.widgets['deep_radio'] = deep_radio
+
+        tensor_radio = ttk.Radiobutton(type_frame, text=self.get_text('tensor_features_option'),
+                                       variable=self.feature_type, value="tensor",
+                                       command=self._on_feature_type_change)
+        tensor_radio.pack(side="left", padx=10)
+        self.widgets['tensor_radio'] = tensor_radio
         
         both_radio = ttk.Radiobutton(type_frame, text=self.get_text('all_features'), 
-                                    variable=self.feature_type, value="both",
+                                    variable=self.feature_type, value="all",
                                     command=self._on_feature_type_change)
         both_radio.pack(side="left", padx=10)
         self.widgets['both_radio'] = both_radio
@@ -926,7 +1002,8 @@ class IntegratedFeatureExtractorGUI:
         all_tabs = {
             'other': getattr(self, 'other_features_tab', None),
             'pyrad': getattr(self, 'pyrad_tab', None),
-            'deep': getattr(self, 'deep_features_tab', None)
+            'deep': getattr(self, 'deep_features_tab', None),
+            'tensor': getattr(self, 'tensor_features_tab', None)
         }
 
         for tab_widget in all_tabs.values():
@@ -943,11 +1020,14 @@ class IntegratedFeatureExtractorGUI:
                 self.notebook.add(all_tabs['pyrad'], text="PyRadiomics特征")
         elif feature_type == "deep":
             if all_tabs['deep']: self.notebook.add(all_tabs['deep'], text="深度学习特征")
-        elif feature_type == "both":
+        elif feature_type == "tensor":
+            if all_tabs['tensor']: self.notebook.add(all_tabs['tensor'], text="张量分解特征")
+        elif feature_type in ("both", "all"):
             if all_tabs['other']: self.notebook.add(all_tabs['other'], text="经典特征")
             if all_tabs['pyrad'] and PYRADIOMICS_AVAILABLE:
                 self.notebook.add(all_tabs['pyrad'], text="PyRadiomics特征")
             if all_tabs['deep']: self.notebook.add(all_tabs['deep'], text="深度学习特征")
+            if all_tabs['tensor']: self.notebook.add(all_tabs['tensor'], text="张量分解特征")
     
     def _setup_parameters_notebook(self, parent):
         param_container = ttk.LabelFrame(parent, text="参数设置", padding="10")
@@ -958,6 +1038,9 @@ class IntegratedFeatureExtractorGUI:
 
         self.other_features_tab = ttk.Frame(self.notebook, padding="10")
         self._setup_other_features(self.other_features_tab)
+
+        self.tensor_features_tab = ttk.Frame(self.notebook, padding="10")
+        self._setup_tensor_features(self.tensor_features_tab)
 
         self.deep_features_tab = ttk.Frame(self.notebook, padding="10")
         self._setup_deep_features(self.deep_features_tab)
@@ -1398,8 +1481,169 @@ class IntegratedFeatureExtractorGUI:
         cpu_label.pack(side="left")
         self.widgets['cpu_label'] = cpu_label
 
-    def _setup_deep_features(self, parent):
+    def _setup_tensor_features(self, parent):
+        tensor_group = ttk.LabelFrame(parent, text=self.get_text('tensor_params_group'), padding="10")
+        tensor_group.pack(fill="x", pady=5)
+        self.widgets['tensor_group'] = tensor_group
 
+        roi_group = ttk.LabelFrame(tensor_group, text=self.get_text('tensor_roi_settings'), padding="5")
+        roi_group.pack(fill="x", pady=5)
+        self.widgets['tensor_roi_group'] = roi_group
+
+        roi_size_row = ttk.Frame(roi_group)
+        roi_size_row.pack(fill="x", pady=2)
+        ttk.Label(roi_size_row, text=self.get_text('tensor_roi_size'), width=18).pack(side="left")
+        ttk.Entry(roi_size_row, textvariable=self.tensor_roi_z, width=5).pack(side="left", padx=2)
+        ttk.Entry(roi_size_row, textvariable=self.tensor_roi_y, width=5).pack(side="left", padx=2)
+        ttk.Entry(roi_size_row, textvariable=self.tensor_roi_x, width=5).pack(side="left", padx=2)
+        auto_cb = ttk.Checkbutton(
+            roi_size_row,
+            text="自动",
+            variable=self.tensor_roi_auto,
+            command=self._on_tensor_roi_auto,
+        )
+        auto_cb.pack(side="left", padx=4)
+        self.widgets['tensor_roi_auto_cb'] = auto_cb
+
+        spacing_row = ttk.Frame(roi_group)
+        spacing_row.pack(fill="x", pady=2)
+        ttk.Label(spacing_row, text=self.get_text('tensor_target_spacing'), width=18).pack(side="left")
+        ttk.Entry(spacing_row, textvariable=self.tensor_target_spacing, width=8).pack(side="left", padx=2)
+
+        q_row = ttk.Frame(roi_group)
+        q_row.pack(fill="x", pady=2)
+        ttk.Label(q_row, text=self.get_text('tensor_q_low'), width=18).pack(side="left")
+        ttk.Entry(q_row, textvariable=self.tensor_q_low, width=6).pack(side="left", padx=2)
+        ttk.Label(q_row, text=self.get_text('tensor_q_high'), width=14).pack(side="left")
+        ttk.Entry(q_row, textvariable=self.tensor_q_high, width=6).pack(side="left", padx=2)
+
+        cols_frame = ttk.Frame(tensor_group)
+        cols_frame.pack(fill="x", pady=5)
+
+        tucker_frame = ttk.LabelFrame(cols_frame, text=self.get_text('tensor_tucker_group'), padding="5")
+        tucker_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        self.widgets['tensor_tucker_frame'] = tucker_frame
+
+        tucker_cb = ttk.Checkbutton(tucker_frame, text="启用Tucker特征", variable=self.enable_tensor_tucker)
+        tucker_cb.pack(anchor="w", pady=2)
+
+        t_eta_row = ttk.Frame(tucker_frame)
+        t_eta_row.pack(fill="x", pady=2)
+        ttk.Label(t_eta_row, text=self.get_text('tensor_tucker_eta'), width=18).pack(side="left")
+        ttk.Entry(t_eta_row, textvariable=self.tensor_tucker_eta, width=10).pack(side="left", padx=2)
+
+        t_k_row = ttk.Frame(tucker_frame)
+        t_k_row.pack(fill="x", pady=2)
+        ttk.Label(t_k_row, text=self.get_text('tensor_tucker_k'), width=18).pack(side="left")
+        ttk.Entry(t_k_row, textvariable=self.tensor_tucker_k, width=10).pack(side="left", padx=2)
+
+        patch_frame = ttk.LabelFrame(cols_frame, text=self.get_text('tensor_patch_group'), padding="5")
+        patch_frame.pack(side="left", fill="both", expand=True, padx=5)
+        self.widgets['tensor_patch_frame'] = patch_frame
+
+        patch_cb = ttk.Checkbutton(patch_frame, text="启用Patch特征", variable=self.enable_tensor_patch)
+        patch_cb.pack(anchor="w", pady=2)
+
+        def _add_patch_row(text_key, var):
+            row = ttk.Frame(patch_frame)
+            row.pack(fill="x", pady=1)
+            ttk.Label(row, text=self.get_text(text_key), width=20).pack(side="left")
+            ttk.Entry(row, textvariable=var, width=10).pack(side="left", padx=2)
+
+        _add_patch_row('tensor_patch_m', self.tensor_patch_m)
+        _add_patch_row('tensor_patch_n', self.tensor_patch_n)
+        _add_patch_row('tensor_patch_s', self.tensor_patch_s)
+        _add_patch_row('tensor_patch_T', self.tensor_patch_T)
+        _add_patch_row('tensor_patch_epsilon', self.tensor_patch_epsilon)
+        _add_patch_row('tensor_patch_alpha', self.tensor_patch_alpha)
+        _add_patch_row('tensor_patch_beta', self.tensor_patch_beta)
+        _add_patch_row('tensor_patch_max_groups', self.tensor_patch_max_groups)
+        _add_patch_row('tensor_patch_k', self.tensor_patch_k)
+
+        cp_frame = ttk.LabelFrame(cols_frame, text=self.get_text('tensor_cp_group'), padding="5")
+        cp_frame.pack(side="left", fill="both", expand=True, padx=(5, 0))
+        self.widgets['tensor_cp_frame'] = cp_frame
+
+        cp_cb = ttk.Checkbutton(cp_frame, text="启用CP特征", variable=self.enable_tensor_cp)
+        cp_cb.pack(anchor="w", pady=2)
+
+        cp_rank_row = ttk.Frame(cp_frame)
+        cp_rank_row.pack(fill="x", pady=1)
+        ttk.Label(cp_rank_row, text=self.get_text('tensor_cp_rank'), width=18).pack(side="left")
+        ttk.Entry(cp_rank_row, textvariable=self.tensor_cp_rank, width=10).pack(side="left", padx=2)
+
+        cp_iter_row = ttk.Frame(cp_frame)
+        cp_iter_row.pack(fill="x", pady=1)
+        ttk.Label(cp_iter_row, text=self.get_text('tensor_cp_max_iter'), width=18).pack(side="left")
+        ttk.Entry(cp_iter_row, textvariable=self.tensor_cp_max_iter, width=10).pack(side="left", padx=2)
+
+        cp_tol_row = ttk.Frame(cp_frame)
+        cp_tol_row.pack(fill="x", pady=1)
+        ttk.Label(cp_tol_row, text=self.get_text('tensor_cp_tol'), width=18).pack(side="left")
+        ttk.Entry(cp_tol_row, textvariable=self.tensor_cp_tol, width=10).pack(side="left", padx=2)
+
+        cp_k_row = ttk.Frame(cp_frame)
+        cp_k_row.pack(fill="x", pady=1)
+        ttk.Label(cp_k_row, text=self.get_text('tensor_cp_k'), width=18).pack(side="left")
+        ttk.Entry(cp_k_row, textvariable=self.tensor_cp_k, width=10).pack(side="left", padx=2)
+
+        cp_eps_row = ttk.Frame(cp_frame)
+        cp_eps_row.pack(fill="x", pady=1)
+        ttk.Label(cp_eps_row, text=self.get_text('tensor_cp_epsilon'), width=18).pack(side="left")
+        ttk.Entry(cp_eps_row, textvariable=self.tensor_cp_epsilon, width=10).pack(side="left", padx=2)
+
+
+    def _on_tensor_roi_auto(self):
+        if not self.tensor_roi_auto.get():
+            return
+
+        try:
+            pairs = []
+            if self.input_type.get() == "single":
+                image_path = self.input_path.get()
+                mask_path = self.mask_path.get()
+                if not image_path or not mask_path:
+                    messagebox.showwarning("警告", "自动估计ROI尺寸前，请先选择图像和掩码文件。")
+                    self.tensor_roi_auto.set(False)
+                    return
+                pairs.append((Path(image_path), Path(mask_path)))
+            else:
+                input_dir = self.input_path.get()
+                mask_dir = self.mask_path.get()
+                if not input_dir or not mask_dir:
+                    messagebox.showwarning("警告", "自动估计ROI尺寸前，请先选择输入文件夹和掩码文件夹。")
+                    self.tensor_roi_auto.set(False)
+                    return
+
+                image_files = self._scan_image_files(input_dir)
+                mask_files = self._scan_mask_files(mask_dir)
+                matched_pairs = self._match_files(image_files, mask_files, input_dir, mask_dir)
+
+                if not matched_pairs:
+                    messagebox.showwarning("警告", "未找到任何匹配的 图像/掩码 对，无法自动估计ROI尺寸。")
+                    self.tensor_roi_auto.set(False)
+                    return
+
+                for case_id, img_path, msk_path, rel in matched_pairs:
+                    pairs.append((Path(img_path), Path(msk_path)))
+
+            roi_z, roi_y, roi_x, stats = estimate_tensor_roi_size(pairs)
+
+            self.tensor_roi_z.set(roi_z)
+            self.tensor_roi_y.set(roi_y)
+            self.tensor_roi_x.set(roi_x)
+
+            self.log_message(
+                f"推荐 ROI尺寸 (Z,Y,X) = [{roi_z}, {roi_y}, {roi_x}]。"
+            )
+
+        except Exception as e:
+            self.tensor_roi_auto.set(False)
+            self.log_message(f"⚠️ 自动估计张量ROI尺寸失败: {e}")
+            messagebox.showwarning("警告", f"自动估计张量ROI尺寸失败：\n{e}")
+
+
+    def _setup_deep_features(self, parent):
         deep_group = ttk.LabelFrame(parent, text="深度学习特征参数", padding="10")
         deep_group.pack(fill="x", pady=5)
 
@@ -1489,7 +1733,6 @@ class IntegratedFeatureExtractorGUI:
                 image, mask = self.image_io.load_image_and_mask(image_path, mask_path)
 
                 spacing = list(image.GetSpacing())[::-1]
-                self.log_message(f"  > 图像间距: {spacing}")
 
                 image_array = self.image_io.sitk_to_numpy(image)
                 mask_array = self.image_io.sitk_to_numpy(mask)
@@ -1841,6 +2084,90 @@ class IntegratedFeatureExtractorGUI:
                     'status': 'failed',
                     'error': str(e)
                 }
+
+    def _process_single_case_tensor_features(
+        self,
+        image_path: str,
+        mask_path: str,
+        case_id: str,
+        roi_size: Tuple[int, int, int],
+        target_spacing_mm: float,
+        q_low: float,
+        q_high: float,
+        tucker_extractor: Optional[GlobalTuckerTensorFeatures],
+        patch_extractor: Optional[PatchTensorFeatures],
+        cp_extractor: Optional[CPTensorFeatures] = None,
+    ) -> Dict:
+
+        try:
+            self.log_message(f"  > 开始处理病例: {case_id}")
+            image, mask = self.image_io.load_image_and_mask(image_path, mask_path)
+
+            spacing_zyx = list(image.GetSpacing())[::-1]
+            image_array = self.image_io.sitk_to_numpy(image)
+            mask_array = self.image_io.sitk_to_numpy(mask)
+
+            result: Dict[str, Any] = {
+                'case_id': case_id,
+                'image_path': image_path,
+                'mask_path': mask_path
+            }
+
+            for level_name, labels in self.config.DISC_LABELS.items():
+                disc_label = labels['disc']
+                self.log_message(f"    - 处理椎间盘层级 {level_name}")
+
+                roi_raw, roi_mask, _ = extract_disc_roi_3d(
+                    image_array,
+                    mask_array,
+                    spacing_zyx,
+                    disc_label,
+                    roi_size=roi_size,
+                    target_spacing_mm=target_spacing_mm,
+                )
+
+                if roi_raw is None or roi_mask is None or not np.any(roi_mask):
+                    self.log_message(f"      · 未找到有效 ROI，跳过 {level_name}")
+                    continue
+
+                roi_norm = normalize_roi_intensity(roi_raw, roi_mask, q_low=q_low, q_high=q_high)
+
+                if tucker_extractor is not None and self.enable_tensor_tucker.get():
+                    try:
+                        tucker_feats = tucker_extractor.extract_features(roi_norm)
+                        for k, v in tucker_feats.items():
+                            result[f"tensor_{level_name}_tucker_{k}"] = v
+                    except Exception as e:
+                        self.log_message(f"      · Tucker特征计算失败 ({level_name}): {e}")
+
+                if patch_extractor is not None and self.enable_tensor_patch.get():
+                    try:
+                        patch_feats = patch_extractor.extract_features(roi_raw, roi_mask)
+                        for k, v in patch_feats.items():
+                            result[f"tensor_{level_name}_patch_{k}"] = v
+                    except Exception as e:
+                        self.log_message(f"      · Patch张量特征计算失败 ({level_name}): {e}")
+
+                if cp_extractor is not None and self.enable_tensor_cp.get():
+                    try:
+                        cp_feats = cp_extractor.extract_features(roi_norm)
+                        for k, v in cp_feats.items():
+                            result[f"tensor_{level_name}_cp_{k}"] = v
+                    except Exception as e:
+                        self.log_message(f"      · CP张量特征计算失败 ({level_name}): {e}")
+
+            result.setdefault('status', 'success')
+            return result
+
+        except Exception as e:
+            self.log_message(f"  > ❌ 处理病例 {case_id} 时发生错误: {e}")
+            import traceback
+            self.log_message(traceback.format_exc())
+            return {
+                'case_id': case_id,
+                'status': 'failed',
+                'error': str(e)
+            }
     
     def extract_other_features(self, matched_pairs=None):
             results = {}
@@ -1892,7 +2219,120 @@ class IntegratedFeatureExtractorGUI:
                 import traceback
                 self.log_message(traceback.format_exc())
                 return {'error': str(e)}
-        
+
+    def extract_tensor_features(self, matched_pairs=None):
+        results = {}
+
+        try:
+            roi_size = (
+                int(self.tensor_roi_z.get()),
+                int(self.tensor_roi_y.get()),
+                int(self.tensor_roi_x.get()),
+            )
+            target_spacing_mm = float(self.tensor_target_spacing.get())
+            q_low = float(self.tensor_q_low.get())
+            q_high = float(self.tensor_q_high.get())
+
+            tucker_extractor = GlobalTuckerTensorFeatures(
+                energy_threshold=float(self.tensor_tucker_eta.get()),
+                k_singular_values=int(self.tensor_tucker_k.get()),
+                logger_callback=self.log_message,
+                debug_mode=self.show_debug_info.get(),
+            ) if self.enable_tensor_tucker.get() else None
+
+            patch_extractor = PatchTensorFeatures(
+                patch_size=int(self.tensor_patch_m.get()),
+                similar_patches=int(self.tensor_patch_n.get()),
+                search_window=int(self.tensor_patch_s.get()),
+                internal_iterations=int(self.tensor_patch_T.get()),
+                epsilon=float(self.tensor_patch_epsilon.get()),
+                alpha_feedback=float(self.tensor_patch_alpha.get()),
+                beta_noise=float(self.tensor_patch_beta.get()),
+                max_patch_groups=int(self.tensor_patch_max_groups.get()),
+                max_singular_values=int(self.tensor_patch_k.get()),
+                logger_callback=self.log_message,
+                debug_mode=self.show_debug_info.get(),
+            ) if self.enable_tensor_patch.get() else None
+
+            cp_extractor = CPTensorFeatures(
+                rank=int(self.tensor_cp_rank.get()),
+                max_iter=int(self.tensor_cp_max_iter.get()),
+                tol=float(self.tensor_cp_tol.get()),
+                epsilon=float(self.tensor_cp_epsilon.get()),
+                top_components=int(self.tensor_cp_k.get()),
+                random_state=self.config.TENSOR_CP_PARAMS['random_state'],
+                logger_callback=self.log_message,
+                debug_mode=self.show_debug_info.get(),
+            ) if self.enable_tensor_cp.get() else None
+
+            if self.input_type.get() == "single":
+                image_path = self.input_path.get()
+                mask_path = self.mask_path.get()
+
+                if not image_path or not mask_path:
+                    raise ValueError("请选择图像和掩码文件")
+
+                p = Path(image_path)
+                base_name = p.name
+                while Path(base_name).suffix:
+                    base_name = Path(base_name).stem
+                case_id = base_name
+
+                single_result = self._process_single_case_tensor_features(
+                    image_path,
+                    mask_path,
+                    case_id,
+                    roi_size,
+                    target_spacing_mm,
+                    q_low,
+                    q_high,
+                    tucker_extractor,
+                    patch_extractor,
+                    cp_extractor,
+                )
+
+                results = {'results': [single_result]}
+
+            else:
+                if not matched_pairs:
+                    raise ValueError("批量张量特征提取需要匹配的图像/掩码文件对")
+
+                self.log_message("开始批量张量特征处理...")
+
+                batch_results: Dict[str, Dict[str, Any]] = {}
+
+                for idx, (case_id, image_path, mask_path, rel_path) in enumerate(matched_pairs):
+                    self.log_message(f"\n 处理病例 {idx+1}/{len(matched_pairs)}: {case_id}")
+
+                    case_result = self._process_single_case_tensor_features(
+                        image_path,
+                        mask_path,
+                        case_id,
+                        roi_size,
+                        target_spacing_mm,
+                        q_low,
+                        q_high,
+                        tucker_extractor,
+                        patch_extractor,
+                        cp_extractor,
+                    )
+                    case_result['relative_path'] = rel_path
+                    batch_results[case_id] = case_result
+
+                results = {
+                    'batch_mode': True,
+                    'total_cases': len(batch_results),
+                    'results': list(batch_results.values())
+                }
+
+            return results
+
+        except Exception as e:
+            self.log_message(f"❌ 张量特征提取主流程失败: {str(e)}")
+            import traceback
+            self.log_message(traceback.format_exc())
+            return {'error': str(e)}
+
     def run_extraction(self):
         try:
             self.log_message("🚀 开始特征提取...")
@@ -1917,7 +2357,7 @@ class IntegratedFeatureExtractorGUI:
                     return
                 self.log_message(f"成功匹配 {len(matched_pairs)} 对文件。")
 
-            if source in ["other", "both"]:
+            if source in ["other", "both", "all"]:
                 self.log_message("🔄 处理经典特征...")
                 other_results = self.extract_other_features(matched_pairs)
                 if 'results' in other_results and other_results['results']:
@@ -1925,7 +2365,7 @@ class IntegratedFeatureExtractorGUI:
                     all_results_df = pd.merge(all_results_df, df_other, on='case_id', how='outer') if not all_results_df.empty else df_other
                 self.log_message("✅ 经典特征提取完成")
 
-            if source in ["pyradiomics", "both"] and PYRADIOMICS_AVAILABLE:
+            if source in ["pyradiomics", "both", "all"] and PYRADIOMICS_AVAILABLE:
                 self.log_message("🔄 处理PyRadiomics特征...")
                 pyrad_results = self.extract_pyradiomics_features(matched_pairs)
                 if 'results' in pyrad_results and pyrad_results['results']:
@@ -1933,13 +2373,21 @@ class IntegratedFeatureExtractorGUI:
                     all_results_df = pd.merge(all_results_df, df_pyrad, on='case_id', how='outer') if not all_results_df.empty else df_pyrad
                 self.log_message("✅ PyRadiomics特征提取完成")
 
-            if source in ["deep", "both"]:
+            if source in ["deep", "both", "all"]:
                 self.log_message("🔄 处理深度学习特征...")
                 deep_results = self.extract_deep_features(matched_pairs)
                 if 'results' in deep_results and deep_results['results']:
                     df_deep = pd.DataFrame(deep_results['results'])
                     all_results_df = pd.merge(all_results_df, df_deep, on='case_id', how='outer') if not all_results_df.empty else df_deep
                 self.log_message("✅ 深度学习特征提取完成")
+
+            if source in ["tensor", "all"]:
+                self.log_message("🔄 处理张量特征...")
+                tensor_results = self.extract_tensor_features(matched_pairs)
+                if 'results' in tensor_results and tensor_results['results']:
+                    df_tensor = pd.DataFrame(tensor_results['results'])
+                    all_results_df = pd.merge(all_results_df, df_tensor, on='case_id', how='outer') if not all_results_df.empty else df_tensor
+                self.log_message("✅ 张量特征提取完成")
             
             if not all_results_df.empty:
                 final_results_list = all_results_df.to_dict('records')
@@ -2017,16 +2465,36 @@ class IntegratedFeatureExtractorGUI:
             df = pd.DataFrame(results['results'])
 
             cols_to_remove = [
-                'image_path', 'mask_path', 'relative_path', 'status',
-                'num_features', 'num_pyradiomics_features', 'diagnostics',
-                't2si_roi_method', 'fd_r_squared', 't2si_num_slices',
-                't2si_mean_roi_size'
+                'image_path',
+                'mask_path',
+                'relative_path',
+                'status',
+                'num_features',
+                'num_pyradiomics_features',
+                'diagnostics',
+                't2si_roi_method',
+                'fd_r_squared',
+                't2si_num_slices',
+                't2si_mean_roi_size',
             ]
-            
+
             for col in df.columns:
-                if (col.endswith('_error') or 
-                    col.endswith('_note') or 
-                    col.endswith('_valid_slices')):
+                is_dscr_col = "_dscr_" in col
+
+                if (col.endswith("_error") or col.endswith("_valid_slices")) and is_dscr_col:
+                    continue
+
+                if (
+                    col.endswith("_error")
+                    or col.endswith("_note")
+                    or col.endswith("_valid_slices")
+                    or "image_path" in col
+                    or "mask_path" in col
+                    or col.startswith("status")
+                    or col.startswith("relative_path")
+                    or col.endswith("_disc_level")
+                    or "t2si_roi_method" in col
+                ):
                     if col not in cols_to_remove:
                         cols_to_remove.append(col)
 
@@ -2071,8 +2539,9 @@ class IntegratedFeatureExtractorGUI:
             'Gabor特征': [col for col in df.columns if col.startswith('gabor_')],
             'Hu矩特征': [col for col in df.columns if col.startswith('hu_')],
             '纹理特征': [col for col in df.columns if col.startswith('texture_')],
+            '张量分解特征': [col for col in df.columns if col.startswith('tensor_')],
             'PyRadiomics特征': [col for col in df.columns if not any(col.startswith(prefix) 
-                            for prefix in ['dhi_', 'asi_', 't2si_', 'fd_', 'gabor_', 'hu_', 'texture_', 'case_', 'status', 'image_', 'mask_'])]
+                            for prefix in ['dhi_', 'asi_', 't2si_', 'fd_', 'gabor_', 'hu_', 'texture_', 'tensor_', 'case_', 'status', 'image_', 'mask_'])]
         }
         
         for feature_type, columns in feature_types.items():
@@ -2323,7 +2792,6 @@ class IntegratedFeatureExtractorGUI:
         return {'results': results_list}
 
     def _create_pyradiomics_params(self):
-            
             params = {
                 'binWidth': self.bin_width.get() if self.bin_width.get() > 0 else None,
                 'binCount': self.bin_count.get() if self.bin_count.get() > 0 else None,
