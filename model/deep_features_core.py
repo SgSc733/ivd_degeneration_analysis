@@ -4,12 +4,14 @@ import numpy as np
 import torch
 import timm
 import nibabel as nib
+import SimpleITK as sitk
 import cv2
 import pandas as pd
 from scipy.ndimage import center_of_mass
 from torchvision import transforms
 import urllib.request
 from tqdm import tqdm
+from pathlib import Path
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -21,10 +23,40 @@ MODEL_URLS = {
 class TqdmUpTo(tqdm):
 
     def update_to(self, b=1, bsize=1, tsize=None):
-
         if tsize is not None:
             self.total = tsize
         self.update(b * bsize - self.n)
+
+
+def _strip_all_suffixes(filename: str) -> str:
+    base = Path(filename).name
+    while Path(base).suffix:
+        base = Path(base).stem
+    return base
+
+
+def _load_volume_as_xyz(path: str) -> np.ndarray:
+
+    p = str(path)
+    p_lower = p.lower()
+
+    if p_lower.endswith(".nii") or p_lower.endswith(".nii.gz"):
+        return nib.load(p).get_fdata()
+
+    try:
+        img = sitk.ReadImage(p)
+    except RuntimeError:
+        pp = Path(p)
+        if not pp.is_absolute():
+            raise
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(pp.parent))
+            img = sitk.ReadImage(pp.name)
+        finally:
+            os.chdir(old_cwd)
+    arr_zyx = sitk.GetArrayFromImage(img)
+    return np.transpose(arr_zyx, (2, 1, 0))
 
 
 def preprocess_slice(image_slice_2d, mask_slice_2d, view_name, case_id, padding_ratio):
@@ -168,13 +200,13 @@ def extract_disc_features(image_3d, mask_3d, disc_label, disc_name, model, devic
     return final_disc_vector, feature_names
 
 def download_model_if_needed(model_size, logger_callback=print):
-
     url = MODEL_URLS.get(model_size)
     if not url:
         logger_callback(f"!!! 错误: 未找到模型大小 '{model_size}' 的下载链接。")
         return False
 
-    model_dir = os.path.join("./model", model_size)
+    current_script_dir = os.path.dirname(os.path.abspath(__file__))
+    model_dir = os.path.join(current_script_dir, model_size)
     weights_path = os.path.join(model_dir, "pytorch_model.bin")
 
     if os.path.exists(weights_path):
@@ -203,12 +235,14 @@ def load_deep_model(model_size, device, logger_callback=print):
     if not success:
         raise FileNotFoundError(f"无法下载或找到模型 '{model_size}' 的权重文件。请检查网络连接或手动下载。")
 
+    current_script_dir = os.path.dirname(os.path.abspath(__file__))
+
     if model_size == "small":
         model_architecture = 'vit_small_patch16_224'
-        local_weights_path = "./model/small/pytorch_model.bin"
+        local_weights_path = os.path.join(current_script_dir, "small", "pytorch_model.bin")
     elif model_size == "base":
         model_architecture = 'vit_base_patch16_224'
-        local_weights_path = "./model/base/pytorch_model.bin"
+        local_weights_path = os.path.join(current_script_dir, "base", "pytorch_model.bin")
     else:
         raise ValueError(f"不支持的模型大小: {model_size}。请选择 'small' 或 'base'。")
 
@@ -242,15 +276,13 @@ def extract_deep_features_for_case(image_path, mask_path, config, model_size, ag
     final_embed_dim = base_embed_dim * 2 if agg_strategy == 'both' else base_embed_dim
 
     try:
-        img_nii = nib.load(image_path)
-        mask_nii = nib.load(mask_path)
-        image_3d_data = img_nii.get_fdata()
-        mask_3d_data = mask_nii.get_fdata()
+        image_3d_data = _load_volume_as_xyz(image_path)
+        mask_3d_data = _load_volume_as_xyz(mask_path)
     except Exception as e:
-        logger_callback(f"错误: 无法加载NIfTI文件: {e}")
+        logger_callback(f"错误: 无法加载图像/掩码文件: {e}")
         return None
 
-    case_id = os.path.basename(image_path).replace('.nii.gz', '').replace('.nii', '')
+    case_id = _strip_all_suffixes(os.path.basename(image_path))
     case_features = {'case_id': case_id}
 
     for disc_name, labels in config.DISC_LABELS.items():
