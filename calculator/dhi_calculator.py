@@ -1,9 +1,10 @@
+import math
 import numpy as np
 import cv2
-from typing import Dict, Tuple, Optional, List
-from .base_calculator import BaseCalculator
+from typing import Dict, Optional, List, Tuple
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
+
+from .base_calculator import BaseCalculator
 from utils.memory_monitor import monitor_memory
 
 
@@ -84,48 +85,41 @@ class DHICalculator(BaseCalculator):
                                 posterior_mid: np.ndarray,
                                 percentage: float) -> np.ndarray:
 
-        h, w = disc_mask.shape
-        center_line_vector = posterior_mid - anterior_mid
-        line_length = np.linalg.norm(center_line_vector)
-        
-        if line_length < 1e-6:
-            return np.zeros_like(disc_mask, dtype=np.uint8)
-            
-        direction_vector = center_line_vector / line_length
+        disc = disc_mask.astype(np.uint8).copy()
+        height, width = disc.shape
 
-        center_point = (anterior_mid + posterior_mid) / 2
-        half_width = line_length * percentage / 2
-        
-        ys, _ = np.where(disc_mask > 0)
-        disc_approx_height = (np.max(ys) - np.min(ys)) if len(ys) > 0 else 20
-        half_height = disc_approx_height * 0.75 / 2
+        points_xy = self._calculate_central_division_points(anterior_mid, posterior_mid, percentage)
+        points_hw = points_xy[:, [1, 0]].astype(int)
 
-        perp_vector = np.array([-direction_vector[1], direction_vector[0]])
+        lu, ld, ru, rd = points_hw
+        if lu[0] > ld[0]:
+            lu, ld = ld, lu
+        if ru[0] > rd[0]:
+            ru, rd = rd, ru
 
-        p1 = center_point - half_width * direction_vector + half_height * perp_vector
-        p2 = center_point + half_width * direction_vector + half_height * perp_vector
-        p3 = center_point + half_width * direction_vector - half_height * perp_vector
-        p4 = center_point - half_width * direction_vector - half_height * perp_vector
-        
-        contour = np.array([p1, p2, p3, p4], dtype=np.int32)
-        
-        central_mask = np.zeros_like(disc_mask, dtype=np.uint8)
-        cv2.fillPoly(central_mask, [contour], 255)
-        
-        return cv2.bitwise_and(central_mask, disc_mask.astype(np.uint8))
+        l_h, l_w = self._get_pixel_hw(int(lu[0]), int(lu[1]), int(ld[0]), int(ld[1]))
+        for hh, ww in zip(l_h, l_w):
+            if 0 <= hh < height:
+                ww = int(np.clip(ww, 0, width))
+                disc[hh, :ww] = 0
+
+        r_h, r_w = self._get_pixel_hw(int(ru[0]), int(ru[1]), int(rd[0]), int(rd[1]))
+        for hh, ww in zip(r_h, r_w):
+            if 0 <= hh < height:
+                ww = int(np.clip(ww, 0, width))
+                disc[hh, ww:] = 0
+
+        return disc
     
     def _calculate_vertebral_corners(self, vertebra_mask: np.ndarray) -> np.ndarray:
 
         if len(vertebra_mask.shape) > 2:
             vertebra_mask = vertebra_mask.squeeze()
             
-        mask_uint8 = (vertebra_mask * 255).astype(np.uint8)
-        
-        kernel = np.ones((3, 3), np.uint8)
-        mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, kernel)
-        
+        mask_f32 = np.float32(vertebra_mask)
+
         corners = cv2.goodFeaturesToTrack(
-            mask_uint8,
+            mask_f32,
             maxCorners=4,
             qualityLevel=0.01,
             minDistance=21,  
@@ -146,12 +140,10 @@ class DHICalculator(BaseCalculator):
         if len(s1_mask.shape) > 2:
             s1_mask = s1_mask.squeeze()
             
-        mask_uint8 = (s1_mask * 255).astype(np.uint8)
-        kernel = np.ones((3, 3), np.uint8)
-        mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, kernel)
-        
+        mask_f32 = np.float32(s1_mask)
+
         corners = cv2.goodFeaturesToTrack(
-            mask_uint8,
+            mask_f32,
             maxCorners=4,
             qualityLevel=0.01,
             minDistance=21,
@@ -164,7 +156,7 @@ class DHICalculator(BaseCalculator):
             return self._fallback_corner_detection(s1_mask)
             
         corners = np.squeeze(corners).astype(int)
-        return self._sort_corners_robust(corners)
+        return self._sort_corners_robust(corners, is_s1=True)
     
     def _fallback_corner_detection(self, mask: np.ndarray) -> np.ndarray:
 
@@ -182,32 +174,42 @@ class DHICalculator(BaseCalculator):
         
         return corners
     
-    def _sort_corners_robust(self, corners: np.ndarray) -> np.ndarray:
-        corners_copy = corners.copy()
-        
+    def _sort_corners_robust(self, corners: np.ndarray, is_s1: bool = False) -> np.ndarray:
+
         sum_wh = np.sum(corners, axis=1)
-        idx_min = np.argmin(sum_wh)  
-        idx_max = np.argmax(sum_wh)  
-        
+        idx_min = int(np.argmin(sum_wh))
+        idx_max = int(np.argmax(sum_wh))
+
         sorted_corners = np.zeros_like(corners)
-        sorted_corners[0] = corners[idx_min]  
-        sorted_corners[3] = corners[idx_max]  
-        
+        sorted_corners[0] = corners[idx_min]
+        sorted_corners[3] = corners[idx_max]
+
         remaining_indices = [i for i in range(4) if i not in [idx_min, idx_max]]
-        remaining_corners = corners[remaining_indices]
-        
-        if remaining_corners[0, 1] < remaining_corners[1, 1]:
-            sorted_corners[1] = remaining_corners[0] 
-            sorted_corners[2] = remaining_corners[1]  
+        remaining = corners[remaining_indices]
+
+        if remaining.shape != (2, 2):
+            return sorted_corners
+
+        if is_s1:
+            if np.sum(remaining[0]) > np.sum(remaining[1]):
+                sorted_corners[2] = remaining[0]
+                sorted_corners[1] = remaining[1]
+            else:
+                sorted_corners[2] = remaining[1]
+                sorted_corners[1] = remaining[0]
         else:
-            sorted_corners[1] = remaining_corners[1] 
-            sorted_corners[2] = remaining_corners[0] 
-        
-        if sorted_corners[1, 0] < sorted_corners[0, 0]:  
+            if remaining[0, 1] > remaining[1, 1]:
+                sorted_corners[2] = remaining[0]
+                sorted_corners[1] = remaining[1]
+            else:
+                sorted_corners[2] = remaining[1]
+                sorted_corners[1] = remaining[0]
+
+        if sorted_corners[1, 0] < sorted_corners[0, 0]:
             sorted_corners[[0, 1]] = sorted_corners[[1, 0]]
-        if sorted_corners[3, 0] < sorted_corners[2, 0]:  
+        if sorted_corners[3, 0] < sorted_corners[2, 0]:
             sorted_corners[[2, 3]] = sorted_corners[[3, 2]]
-        
+
         return sorted_corners
     
     def _calculate_disc_parameters(self, disc_mask: np.ndarray,
@@ -229,8 +231,8 @@ class DHICalculator(BaseCalculator):
         )
         
         central_area = np.sum(central_mask > 0)
-        
-        disc_height = central_area / (small_width * self.central_ratio) if small_width > 0 else 0
+
+        disc_height = central_area / small_width if small_width > 1e-6 else 0
         
         central_points = self._calculate_central_division_points(
             anterior_mid, posterior_mid, self.central_ratio
@@ -248,111 +250,129 @@ class DHICalculator(BaseCalculator):
                             anterior_mid: np.ndarray,
                             posterior_mid: np.ndarray) -> float:
 
-        h0, w0 = int(anterior_mid[1]), int(anterior_mid[0])
-        h1, w1 = int(posterior_mid[1]), int(posterior_mid[0])
-        
-        disc_mask = disc_mask.astype(np.uint8)
-        height, width = disc_mask.shape
-        
-        if w1 == w0:
-            left_bound = w0
-            for w in range(w0, -1, -1):
-                if disc_mask[h0, w] == 0:
-                    left_bound = w + 1
+        disc = np.asarray(disc_mask, dtype=np.uint8)
+        height, width = disc.shape
+
+        p1_hw = np.array([float(anterior_mid[1]), float(anterior_mid[0])])
+        p2_hw = np.array([float(posterior_mid[1]), float(posterior_mid[0])])
+
+        h0 = int(np.clip(int(p1_hw[0]), 0, height - 1))
+        w0 = int(np.clip(int(p1_hw[1]), 0, width - 1))
+        h1 = int(np.clip(int(p2_hw[0]), 0, height - 1))
+        w1 = int(np.clip(int(p2_hw[1]), 0, width - 1))
+
+        point_you = [h1, w1]
+        point_zuo = [h0, w0]
+
+        if h0 == h1:
+            for s in range(w1, width):
+                if disc[h1, s] == 0:
+                    point_you = [h1, s - 1]
                     break
-            
-            right_bound = w1
-            for w in range(w1, width):
-                if disc_mask[h1, w] == 0:
-                    right_bound = w - 1
+
+            for t in range(w0, 0, -1):
+                if disc[h0, t] == 0:
+                    point_zuo = [h0, t + 1]
                     break
-            
-            big_width = right_bound - left_bound
         else:
-            slope = (h1 - h0) / (w1 - w0)
-            intercept = h0 - slope * w0
-            
-            left_point = None
-            for w in range(w0, -1, -1):
-                h = int(slope * w + intercept)
-                if 0 <= h < height:
-                    if disc_mask[h, w] == 0:
-                        left_point = [h, w + 1]
-                        break
-            
-            right_point = None
-            for w in range(w1, width):
-                h = int(slope * w + intercept)
-                if 0 <= h < height:
-                    if disc_mask[h, w] == 0:
-                        right_point = [h, w - 1]
-                        break
-            
-            if left_point and right_point:
-                big_width = np.linalg.norm(np.array(right_point) - np.array(left_point))
-            else:
-                big_width = np.linalg.norm(posterior_mid - anterior_mid)
-        
-        return big_width
+            if abs(p2_hw[1] - p1_hw[1]) < 1e-6:
+                return float(np.linalg.norm(p2_hw - p1_hw))
+
+            m = (p2_hw[0] - p1_hw[0]) / (p2_hw[1] - p1_hw[1])
+            b = p1_hw[0] - m * p1_hw[1]
+
+            for s in range(w1, width):
+                hh = int(m * s + b)
+                if 0 <= hh < height and disc[hh, s] == 0:
+                    point_you = [int(m * (s - 1) + b), s - 1]
+                    break
+
+            for t in range(w0, 0, -1):
+                hh = int(m * t + b)
+                if 0 <= hh < height and disc[hh, t] == 0:
+                    point_zuo = [int(m * (t + 1) + b), t + 1]
+                    break
+
+        diff = np.array(point_you) - np.array(point_zuo)
+        return math.hypot(float(diff[0]), float(diff[1]))
     
+    def _get_pixel_hw(self, h0: int, w0: int, h1: int, w1: int) -> Tuple[List[int], List[int]]:
+
+        piont_h: List[int] = []
+        piont_w: List[int] = []
+
+        if h0 == h1 and w0 == w1:
+            return [h0], [w0]
+
+        if h0 > h1:
+            h0, h1 = h1, h0
+            w0, w1 = w1, w0
+
+        if w0 == w1:
+            for j in range(h0, h1):
+                piont_h.append(j)
+                piont_w.append(w0)
+            return piont_h, piont_w
+
+        m = (h1 - h0) / (w1 - w0)
+        b = h0 - m * w0
+
+        for j in range(h0, h1):
+            w_temp = (j - b) / m
+            piont_w.append(int(round(w_temp)))
+            piont_h.append(j)
+
+        return piont_h, piont_w
+
     def _calculate_central_division_points(self, anterior_mid: np.ndarray,
                                           posterior_mid: np.ndarray,
                                           ratio: float) -> np.ndarray:
 
-        center = (anterior_mid + posterior_mid) / 2
-        
-        direction = posterior_mid - anterior_mid
-        direction_norm = direction / (np.linalg.norm(direction) + 1e-8)
-        
-        perpendicular = np.array([-direction_norm[1], direction_norm[0]])
-        
-        half_length = np.linalg.norm(direction) * ratio / 2
-        half_height = 0.75 
-        
-        points = np.array([
-            center - half_length * direction_norm - half_height * perpendicular,  
-            center - half_length * direction_norm + half_height * perpendicular,  
-            center + half_length * direction_norm - half_height * perpendicular,  
-            center + half_length * direction_norm + half_height * perpendicular  
-        ])
-        
-        return points.astype(int)
+        p1_hw = np.array([float(anterior_mid[1]), float(anterior_mid[0])])
+        p2_hw = np.array([float(posterior_mid[1]), float(posterior_mid[0])])
+
+        delta_h = abs(float(p1_hw[0] - p2_hw[0]))
+        delta_w = abs(float(p1_hw[1] - p2_hw[1]))
+
+        c0 = (p1_hw + p2_hw) / 2.0
+
+        miu_half = 0.5 * float(ratio)
+        qiang_half = 0.5 * 0.75
+
+        if p1_hw[0] < p2_hw[0]:
+            c0lu = np.array([c0[0] - miu_half * delta_h - qiang_half * delta_w,
+                             c0[1] - miu_half * delta_w + qiang_half * delta_h])
+            c0ld = np.array([c0[0] - miu_half * delta_h + qiang_half * delta_w,
+                             c0[1] - miu_half * delta_w - qiang_half * delta_h])
+            c0ru = np.array([c0[0] + miu_half * delta_h - qiang_half * delta_w,
+                             c0[1] + miu_half * delta_w + qiang_half * delta_h])
+            c0rd = np.array([c0[0] + miu_half * delta_h + qiang_half * delta_w,
+                             c0[1] + miu_half * delta_w - qiang_half * delta_h])
+        else:
+            c0lu = np.array([c0[0] + miu_half * delta_h - qiang_half * delta_w,
+                             c0[1] - miu_half * delta_w - qiang_half * delta_h])
+            c0ld = np.array([c0[0] + miu_half * delta_h + qiang_half * delta_w,
+                             c0[1] - miu_half * delta_w + qiang_half * delta_h])
+            c0ru = np.array([c0[0] - miu_half * delta_h - qiang_half * delta_w,
+                             c0[1] + miu_half * delta_w - qiang_half * delta_h])
+            c0rd = np.array([c0[0] - miu_half * delta_h + qiang_half * delta_w,
+                             c0[1] + miu_half * delta_w + qiang_half * delta_h])
+
+        points_hw = np.array([np.int0(c0lu), np.int0(c0ld), np.int0(c0ru), np.int0(c0rd)], dtype=int)
+        return points_hw[:, [1, 0]]
     
     def _calculate_vertebral_diameter(self, corners: np.ndarray) -> float:
 
-        corners_sorted_by_x = corners[np.argsort(corners[:, 0])]
-        anterior_points = corners_sorted_by_x[:2]
-        posterior_points = corners_sorted_by_x[2:]
-        
-        anterior_midpoint = np.mean(anterior_points, axis=0)
-        posterior_midpoint = np.mean(posterior_points, axis=0)
-        
-        return np.linalg.norm(anterior_midpoint - posterior_midpoint)
+        point_h = corners[:, 1].astype(float)
+        point_w = corners[:, 0].astype(float)
+
+        wid_up = math.hypot(point_h[0] - point_h[1], point_w[0] - point_w[1])
+        wid_down = math.hypot(point_h[2] - point_h[3], point_w[2] - point_w[3])
+        return (wid_up + wid_down) / 2.0
 
     def _calculate_vertebral_height(self, vertebra_mask: np.ndarray, diameter: float) -> float:
-
-        area = np.sum(vertebra_mask > 0)
-        if diameter < 1e-6:
-            return 0
-        return area / diameter
-
-    def _calculate_vertebral_diameter(self, corners: np.ndarray) -> float:
-
-        corners_sorted_by_x = corners[np.argsort(corners[:, 0])]
-        anterior_points = corners_sorted_by_x[:2]
-        posterior_points = corners_sorted_by_x[2:]
-        
-        anterior_midpoint = np.mean(anterior_points, axis=0)
-        posterior_midpoint = np.mean(posterior_points, axis=0)
-        
-        return np.linalg.norm(anterior_midpoint - posterior_midpoint)
-
-    def _calculate_vertebral_height(self, vertebra_mask: np.ndarray, diameter: float) -> float:
-
-        area = np.sum(vertebra_mask > 0)
-        if diameter < 1e-6:
-            return 0
-        return area / diameter
+        area = float(np.sum(vertebra_mask))
+        return area / diameter if diameter > 1e-6 else 0.0
 
     def _calculate_dhi(self, disc_height: float, 
                     upper_vertebra_height: float,
