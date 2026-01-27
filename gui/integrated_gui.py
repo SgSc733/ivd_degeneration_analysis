@@ -1604,7 +1604,6 @@ class IntegratedFeatureExtractorGUI:
                 mask_path = self.mask_path.get()
                 if not image_path or not mask_path:
                     messagebox.showwarning("警告", "自动估计ROI尺寸前，请先选择图像和掩码文件。")
-                    self.tensor_roi_auto.set(False)
                     return
                 pairs.append((Path(image_path), Path(mask_path)))
             else:
@@ -1612,7 +1611,6 @@ class IntegratedFeatureExtractorGUI:
                 mask_dir = self.mask_path.get()
                 if not input_dir or not mask_dir:
                     messagebox.showwarning("警告", "自动估计ROI尺寸前，请先选择输入文件夹和掩码文件夹。")
-                    self.tensor_roi_auto.set(False)
                     return
 
                 image_files = self._scan_image_files(input_dir)
@@ -1620,25 +1618,62 @@ class IntegratedFeatureExtractorGUI:
                 matched_pairs = self._match_files(image_files, mask_files, input_dir, mask_dir)
 
                 if not matched_pairs:
+                    mask_dict_simple = {}
+                    for mask_path, _mask_rel in mask_files:
+                        p = Path(mask_path)
+                        base_name = p.name
+                        while Path(base_name).suffix:
+                            base_name = Path(base_name).stem
+                        clean_base = (
+                            base_name.replace("_mask", "")
+                            .replace("_seg", "")
+                            .replace("-mask", "")
+                            .replace("-seg", "")
+                        )
+                        mask_dict_simple.setdefault(clean_base, mask_path)
+
+                    for image_path, image_rel_path in image_files:
+                        p = Path(image_path)
+                        base_name = p.name
+                        while Path(base_name).suffix:
+                            base_name = Path(base_name).stem
+                        if base_name in mask_dict_simple:
+                            matched_pairs.append((base_name, image_path, mask_dict_simple[base_name], image_rel_path))
+
+                if not matched_pairs:
                     messagebox.showwarning("警告", "未找到任何匹配的 图像/掩码 对，无法自动估计ROI尺寸。")
-                    self.tensor_roi_auto.set(False)
                     return
+
+                self.log_message(
+                    f"ROI自动估计：扫描到图像 {len(image_files)} 个、掩码 {len(mask_files)} 个，匹配到 {len(matched_pairs)} 对。"
+                )
 
                 for case_id, img_path, msk_path, rel in matched_pairs:
                     pairs.append((Path(img_path), Path(msk_path)))
 
-            roi_z, roi_y, roi_x, stats = estimate_tensor_roi_size(pairs)
+            if len(pairs) > 200:
+                idxs = np.linspace(0, len(pairs) - 1, num=200, dtype=int)
+                pairs_for_est = [pairs[int(i)] for i in idxs.tolist()]
+            else:
+                pairs_for_est = pairs
 
+            roi_z, roi_y, roi_x, stats = estimate_tensor_roi_size(pairs_for_est)
+
+            prev_roi = (int(self.tensor_roi_z.get()), int(self.tensor_roi_y.get()), int(self.tensor_roi_x.get()))
             self.tensor_roi_z.set(roi_z)
             self.tensor_roi_y.set(roi_y)
             self.tensor_roi_x.set(roi_x)
 
-            self.log_message(
-                f"推荐 ROI尺寸 (Z,Y,X) = [{roi_z}, {roi_y}, {roi_x}]。"
-            )
+            new_roi = (roi_z, roi_y, roi_x)
+            if prev_roi == new_roi:
+                self.log_message(f"ROI自动估计完成：推荐尺寸与当前一致 (Z,Y,X) = [{roi_z}, {roi_y}, {roi_x}]。")
+            else:
+                self.log_message(
+                    f"ROI自动估计完成：当前 (Z,Y,X) = [{prev_roi[0]}, {prev_roi[1]}, {prev_roi[2]}]，"
+                    f"推荐 (Z,Y,X) = [{roi_z}, {roi_y}, {roi_x}]（已更新输入框）。"
+                )
 
         except Exception as e:
-            self.tensor_roi_auto.set(False)
             self.log_message(f"⚠️ 自动估计张量ROI尺寸失败: {e}")
             messagebox.showwarning("警告", f"自动估计张量ROI尺寸失败：\n{e}")
 
@@ -1743,11 +1778,13 @@ class IntegratedFeatureExtractorGUI:
                     'mask_path': mask_path
                 }
 
+                slice_axis = int(np.argmax(spacing)) if len(spacing) >= 3 else int(self.config.SLICE_AXIS)
+
                 image_slices = self._extract_middle_slices(
-                    image_array, self.config.NUM_SLICES, self.config.SLICE_AXIS
+                    image_array, self.config.NUM_SLICES, slice_axis
                 )
                 mask_slices = self._extract_middle_slices(
-                    mask_array, self.config.NUM_SLICES, self.config.SLICE_AXIS
+                    mask_array, self.config.NUM_SLICES, slice_axis
                 )
 
                 if not any(np.any(s > 0) for s in mask_slices):
@@ -2685,8 +2722,13 @@ class IntegratedFeatureExtractorGUI:
                     raise ValueError("请选择图像和掩码文件")
                 
                 p = Path(image_path)
-                case_id = p.stem.split('.')[0]
+                base_name = p.name
+                while Path(base_name).suffix:
+                    base_name = Path(base_name).stem
+                case_id = base_name
                 self.log_message(f"处理单个病例: {case_id}")
+
+                image_sitk, mask_sitk = self.image_io.load_image_and_mask(image_path, mask_path)
                 
                 patient_all_disc_features = {'case_id': case_id}
                 total_features_count = 0
@@ -2696,7 +2738,7 @@ class IntegratedFeatureExtractorGUI:
                     self.log_message(f"  -> 提取 {disc_name}的PyRadiomics特征...")
                     
                     try:
-                        feature_vector = extractor.execute(image_path, mask_path, label=disc_label)
+                        feature_vector = extractor.execute(image_sitk, mask_sitk, label=disc_label)
                         
                         disc_features = {}
                         for key, value in feature_vector.items():
@@ -2724,11 +2766,13 @@ class IntegratedFeatureExtractorGUI:
                     patient_all_disc_features = {'case_id': case_id}
                     total_features_count = 0
 
+                    image_sitk, mask_sitk = self.image_io.load_image_and_mask(image_path, mask_path)
+
                     for disc_name, labels in self.config.DISC_LABELS.items():
                         disc_label = labels['disc']
                         self.log_message(f"  -> 提取 {disc_name}的PyRadiomics特征...")
                         try:
-                            feature_vector = extractor.execute(image_path, mask_path, label=disc_label)
+                            feature_vector = extractor.execute(image_sitk, mask_sitk, label=disc_label)
                             
                             disc_features = {}
                             for key, value in feature_vector.items():
