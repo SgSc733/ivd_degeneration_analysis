@@ -3,6 +3,7 @@ import numpy as np
 from pathlib import Path
 from typing import Union, Tuple, Optional, List
 import logging
+import os
 
 
 class ImageIO:
@@ -17,7 +18,18 @@ class ImageIO:
             raise FileNotFoundError(f"图像文件不存在: {image_path}")
             
         self.logger.info(f"加载图像: {image_path}")
-        image = sitk.ReadImage(str(image_path))
+        try:
+            image = sitk.ReadImage(str(image_path))
+        except RuntimeError:
+            if not image_path.is_absolute():
+                raise
+
+            old_cwd = os.getcwd()
+            try:
+                os.chdir(str(image_path.parent))
+                image = sitk.ReadImage(image_path.name)
+            finally:
+                os.chdir(old_cwd)
         return image
     
     def load_image_and_mask(self, image_path: Union[str, Path], 
@@ -28,6 +40,11 @@ class ImageIO:
 
         if image.GetSize() != mask.GetSize():
             raise ValueError(f"图像尺寸 {image.GetSize()} 与掩模尺寸 {mask.GetSize()} 不匹配")
+
+        try:
+            mask.CopyInformation(image)
+        except Exception:
+            pass
             
         return image, mask
     
