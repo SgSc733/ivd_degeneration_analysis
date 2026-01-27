@@ -366,7 +366,6 @@ class DSCRCalculator(BaseCalculator):
             'dscr': float(np.mean(dscr_values)),
             'dscr_std': float(np.std(dscr_values)),
             'dscr_max': float(np.max(dscr_values)),
-            'num_valid_slices': len(all_results),
         }
 
         final_result.update({k: v for k, v in all_results[0].items() if k not in final_result})
