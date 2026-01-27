@@ -5,7 +5,6 @@ import cv2
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import tkinter as tk
 import SimpleITK as sitk
-import scipy.ndimage as ndi
 import pydicom
 from pathlib import Path
 import json
@@ -27,15 +26,12 @@ PERTURB_TEXT_DICT = {
         'original': '原始',
         'dilation': '膨胀',
         'erosion': '腐蚀',
-        'contour_random': '轮廓随机化',
         'translation': '平移',
         'rotation': '旋转',
         'gaussian_noise': '高斯噪声',
         'translation_rotation': '平移+旋转',
         'dilation_trans_rot': '膨胀+平移+旋转',
         'erosion_trans_rot': '腐蚀+平移+旋转',
-        'contour_trans_rot': '轮廓随机化+平移+旋转',
-        'contour_trans_rot_noise': '轮廓随机化+平移+旋转+噪声',
         'param_settings': '🔧 参数设置',
         'translation_range': '平移范围(像素):',
         'rotation_range': '旋转范围(度):',
@@ -66,15 +62,12 @@ class PerturbationWorker(threading.Thread):
     PERTURBATION_MAPPING = {
         "膨胀": "dilation",
         "腐蚀": "erosion",
-        "轮廓随机化": "contour_random",
         "平移": "translation",
         "旋转": "rotation",
         "高斯噪声": "gaussian_noise",
         "平移+旋转": "translation_rotation",
         "膨胀+平移+旋转": "dilation_trans_rot",
-        "腐蚀+平移+旋转": "erosion_trans_rot",
-        "轮廓随机化+平移+旋转": "contour_trans_rot",
-        "轮廓随机化+平移+旋转+噪声": "contour_trans_rot_noise"
+        "腐蚀+平移+旋转": "erosion_trans_rot"
     }
         
     def __init__(self, image_path, mask_path, output_path, perturbations, params, callback_queue):
@@ -228,8 +221,6 @@ class PerturbationWorker(threading.Thread):
             return self.apply_dilation(img, mask)
         elif perturb_name == "腐蚀":
             return self.apply_erosion(img, mask)
-        elif perturb_name == "轮廓随机化":
-            return self.apply_contour_randomization(img, mask)
         elif perturb_name == "平移":
             return self.apply_translation(img, mask)
         elif perturb_name == "旋转":
@@ -239,18 +230,11 @@ class PerturbationWorker(threading.Thread):
         elif perturb_name == "平移+旋转":
             return self.apply_translation_rotation(img, mask)
         elif perturb_name == "膨胀+平移+旋转":
-            img_temp, mask_temp = self.apply_dilation(img, mask)
-            return self.apply_translation_rotation(img_temp, mask_temp)
+            img_temp, mask_temp = self.apply_translation_rotation(img, mask)
+            return self.apply_dilation(img_temp, mask_temp)
         elif perturb_name == "腐蚀+平移+旋转":
-            img_temp, mask_temp = self.apply_erosion(img, mask)
-            return self.apply_translation_rotation(img_temp, mask_temp)
-        elif perturb_name == "轮廓随机化+平移+旋转":
-            img_temp, mask_temp = self.apply_contour_randomization(img, mask)
-            return self.apply_translation_rotation(img_temp, mask_temp)
-        elif perturb_name == "轮廓随机化+平移+旋转+噪声":
-            img_temp, mask_temp = self.apply_contour_randomization(img, mask)
-            img_temp2, mask_temp2 = self.apply_translation_rotation(img_temp, mask_temp)
-            return self.apply_gaussian_noise(img_temp2, mask_temp2)
+            img_temp, mask_temp = self.apply_translation_rotation(img, mask)
+            return self.apply_erosion(img_temp, mask_temp)
         else:
             return img.copy(), mask.copy()
             
@@ -266,8 +250,6 @@ class PerturbationWorker(threading.Thread):
             return self.apply_dilation(img_slice, mask_slice)
         elif perturb_name == "腐蚀":
             return self.apply_erosion(img_slice, mask_slice)
-        elif perturb_name == "轮廓随机化":
-            return self.apply_contour_randomization(img_slice, mask_slice)
         elif perturb_name == "平移":
             return self.apply_translation(img_slice, mask_slice)
         elif perturb_name == "旋转":
@@ -282,13 +264,6 @@ class PerturbationWorker(threading.Thread):
         elif perturb_name == "腐蚀+平移+旋转":
             img_temp, mask_temp = self.apply_erosion(img_slice, mask_slice)
             return self.apply_translation_rotation(img_temp, mask_temp)
-        elif perturb_name == "轮廓随机化+平移+旋转":
-            img_temp, mask_temp = self.apply_contour_randomization(img_slice, mask_slice)
-            return self.apply_translation_rotation(img_temp, mask_temp)
-        elif perturb_name == "轮廓随机化+平移+旋转+噪声":
-            img_temp, mask_temp = self.apply_contour_randomization(img_slice, mask_slice)
-            img_temp2, mask_temp2 = self.apply_translation_rotation(img_temp, mask_temp)
-            return self.apply_gaussian_noise(img_temp2, mask_temp2)
         else:
             return img_slice.copy(), mask_slice.copy()
 
@@ -320,30 +295,36 @@ class PerturbationWorker(threading.Thread):
         disc_labels = [3, 5, 7, 9, 11]
         
         if image.ndim == 3:
-            struct = ndi.generate_binary_structure(3, kernel_size)
-            
             final_mask = mask.copy()
             final_mask[np.isin(mask, disc_labels)] = 0
-            
+
+            kernel_2d_size = max(1, int(kernel_size))
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_2d_size, kernel_2d_size))
+
             for label in disc_labels:
-                binary_mask = (mask == label)
-                if not np.any(binary_mask):
+                binary_mask = (mask == label).astype(np.uint8)
+                if np.sum(binary_mask) == 0:
                     continue
-                
-                dilated = ndi.binary_dilation(binary_mask, structure=struct, iterations=iterations)
-                final_mask[dilated] = label
-            
+
+                dilated = np.zeros_like(binary_mask, dtype=np.uint8)
+                for z in range(binary_mask.shape[0]):
+                    if np.sum(binary_mask[z]) == 0:
+                        continue
+                    dilated[z] = cv2.dilate(binary_mask[z], kernel, iterations=int(iterations))
+
+                final_mask[dilated > 0] = label
+
             return image.copy(), final_mask
-        
+
         else:
             result_mask = mask.copy()
-            kernel_2d_size = max(2, iterations * 2)
+            kernel_2d_size = max(1, int(kernel_size))
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_2d_size, kernel_2d_size))
             for label in disc_labels:
                 binary_mask = (mask == label).astype(np.uint8)
                 if np.sum(binary_mask) == 0:
                     continue
-                dilated = cv2.dilate(binary_mask, kernel, iterations=1)
+                dilated = cv2.dilate(binary_mask, kernel, iterations=int(iterations))
                 result_mask[dilated > 0] = label
             return image.copy(), result_mask
 
@@ -353,56 +334,43 @@ class PerturbationWorker(threading.Thread):
         disc_labels = [3, 5, 7, 9, 11]
 
         if image.ndim == 3:
-            struct = ndi.generate_binary_structure(3, kernel_size)
-            
             final_mask = mask.copy()
             final_mask[np.isin(mask, disc_labels)] = 0
-            
+
+            kernel_2d_size = max(1, int(kernel_size))
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_2d_size, kernel_2d_size))
+
             for label in disc_labels:
-                binary_mask = (mask == label)
-                if not np.any(binary_mask):
+                binary_mask = (mask == label).astype(np.uint8)
+                if np.sum(binary_mask) == 0:
                     continue
-                    
-                eroded = ndi.binary_erosion(binary_mask, structure=struct, iterations=iterations)
-                
+
+                eroded = np.zeros_like(binary_mask, dtype=np.uint8)
+                for z in range(binary_mask.shape[0]):
+                    if np.sum(binary_mask[z]) == 0:
+                        continue
+                    eroded[z] = cv2.erode(binary_mask[z], kernel, iterations=int(iterations))
+
                 if np.sum(eroded) > self.MIN_PIXEL_THRESHOLD:
-                    final_mask[eroded] = label
-                else: 
-                    final_mask[binary_mask] = label
+                    final_mask[eroded > 0] = label
+                else:
+                    final_mask[binary_mask > 0] = label
 
             return image.copy(), final_mask
 
         else:
             result_mask = mask.copy()
-            kernel_2d_size = max(2, iterations * 2)
+            kernel_2d_size = max(1, int(kernel_size))
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_2d_size, kernel_2d_size))
             for label in disc_labels:
                 binary_mask = (mask == label).astype(np.uint8)
                 if np.sum(binary_mask) == 0:
                     continue
-                eroded = cv2.erode(binary_mask, kernel, iterations=1)
+                eroded = cv2.erode(binary_mask, kernel, iterations=int(iterations))
                 if np.sum(eroded) > self.MIN_PIXEL_THRESHOLD:
                     result_mask[mask == label] = 0
                     result_mask[eroded > 0] = label
             return image.copy(), result_mask
-
-    def apply_contour_randomization(self, image, mask):
-        base_kernel_size = self.params.get('morph_kernel_size', 2)
-        base_iterations = self.params.get('morph_iterations', 2)
-        
-        random_params = {
-            'use_dilation': np.random.random() > 0.5,
-            'kernel_size': np.random.randint(
-                max(3, base_kernel_size - 2),
-                base_kernel_size + 3
-            ),
-            'iterations': np.random.randint(
-                max(1, base_iterations - 1),
-                base_iterations + 2
-            )
-        }
-        
-        return self.apply_contour_randomization_with_params(image, mask, random_params)
 
     def apply_translation(self, image, mask):
         image = np.squeeze(image) if image.ndim > 2 else image
@@ -415,8 +383,22 @@ class PerturbationWorker(threading.Thread):
         M = np.float32([[1, 0, tx], [0, 1, ty]])
         h, w = image.shape[:2]
         
-        translated_img = cv2.warpAffine(image.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        translated_mask = cv2.warpAffine(mask.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        translated_img = cv2.warpAffine(
+            image.astype(np.float32),
+            M,
+            (w, h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        )
+        translated_mask = cv2.warpAffine(
+            mask.astype(np.float32),
+            M,
+            (w, h),
+            flags=cv2.INTER_NEAREST,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        )
         
         return translated_img, translated_mask
 
@@ -432,8 +414,22 @@ class PerturbationWorker(threading.Thread):
         
         M = cv2.getRotationMatrix2D(center, angle, 1.0)
         
-        rotated_img = cv2.warpAffine(image.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        rotated_mask = cv2.warpAffine(mask.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        rotated_img = cv2.warpAffine(
+            image.astype(np.float32),
+            M,
+            (w, h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        )
+        rotated_mask = cv2.warpAffine(
+            mask.astype(np.float32),
+            M,
+            (w, h),
+            flags=cv2.INTER_NEAREST,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        )
         
         return rotated_img, rotated_mask
 
@@ -465,13 +461,26 @@ class PerturbationWorker(threading.Thread):
         M_rot[0, 2] += tx
         M_rot[1, 2] += ty
         
-        transformed_img = cv2.warpAffine(image.astype(np.float32), M_rot, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        transformed_mask = cv2.warpAffine(mask.astype(np.float32), M_rot, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        transformed_img = cv2.warpAffine(
+            image.astype(np.float32),
+            M_rot,
+            (w, h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        )
+        transformed_mask = cv2.warpAffine(
+            mask.astype(np.float32),
+            M_rot,
+            (w, h),
+            flags=cv2.INTER_NEAREST,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        )
         
         return transformed_img, transformed_mask
     
     def _get_mask_center_of_mass(self, sitk_mask):
-
         binary_mask = sitk_mask > 0
         
         label_stats_filter = sitk.LabelShapeStatisticsImageFilter()
@@ -493,16 +502,6 @@ class PerturbationWorker(threading.Thread):
             max_angle = self.params['rotation_range']
             params['angle'] = np.random.uniform(-max_angle, max_angle)
         
-        if "轮廓随机化" in perturb_name:
-            base_kernel_size = self.params['morph_kernel_size']
-            base_iterations = self.params['morph_iterations']
-            params['use_dilation'] = np.random.random() > 0.5
-            params['kernel_size'] = base_kernel_size 
-            params['iterations'] = np.random.randint(
-                max(1, base_iterations - 1),
-                base_iterations + 2
-            )
-        
         return params
 
     def _apply_perturbation_with_params(self, img, mask, perturb_name, random_params, img_path=None):
@@ -515,8 +514,6 @@ class PerturbationWorker(threading.Thread):
             return self.apply_dilation(img, mask)
         elif perturb_name == "腐蚀":
             return self.apply_erosion(img, mask)
-        elif perturb_name == "轮廓随机化":
-            return self.apply_contour_randomization_with_params(img, mask, random_params)
         elif perturb_name == "平移":
             return self.apply_translation_with_params(img, mask, random_params, img_path)
         elif perturb_name == "旋转":
@@ -526,18 +523,11 @@ class PerturbationWorker(threading.Thread):
         elif perturb_name == "平移+旋转":
             return self.apply_translation_rotation_with_params(img, mask, random_params, img_path)
         elif perturb_name == "膨胀+平移+旋转":
-            img_temp, mask_temp = self.apply_dilation(img, mask)
-            return self.apply_translation_rotation_with_params(img_temp, mask_temp, random_params, img_path)
+            img_temp, mask_temp = self.apply_translation_rotation_with_params(img, mask, random_params, img_path)
+            return self.apply_dilation(img_temp, mask_temp)
         elif perturb_name == "腐蚀+平移+旋转":
-            img_temp, mask_temp = self.apply_erosion(img, mask)
-            return self.apply_translation_rotation_with_params(img_temp, mask_temp, random_params, img_path)
-        elif perturb_name == "轮廓随机化+平移+旋转":
-            img_temp, mask_temp = self.apply_contour_randomization_with_params(img, mask, random_params)
-            return self.apply_translation_rotation_with_params(img_temp, mask_temp, random_params, img_path)
-        elif perturb_name == "轮廓随机化+平移+旋转+噪声":
-            img_temp, mask_temp = self.apply_contour_randomization_with_params(img, mask, random_params)
-            img_temp2, mask_temp2 = self.apply_translation_rotation_with_params(img_temp, mask_temp, random_params, img_path)
-            return self.apply_gaussian_noise(img_temp2, mask_temp2)
+            img_temp, mask_temp = self.apply_translation_rotation_with_params(img, mask, random_params, img_path)
+            return self.apply_erosion(img_temp, mask_temp)
         else:
             return img.copy(), mask.copy()
 
@@ -565,8 +555,22 @@ class PerturbationWorker(threading.Thread):
         else:
             M = np.float32([[1, 0, tx], [0, 1, ty]])
             h, w = image.shape[:2]
-            translated_img = cv2.warpAffine(image.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-            translated_mask = cv2.warpAffine(mask.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+            translated_img = cv2.warpAffine(
+                image.astype(np.float32),
+                M,
+                (w, h),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_CONSTANT,
+                borderValue=0,
+            )
+            translated_mask = cv2.warpAffine(
+                mask.astype(np.float32),
+                M,
+                (w, h),
+                flags=cv2.INTER_NEAREST,
+                borderMode=cv2.BORDER_CONSTANT,
+                borderValue=0,
+            )
             return translated_img, translated_mask
 
     def apply_rotation_with_params(self, image, mask, params, img_path):
@@ -598,8 +602,22 @@ class PerturbationWorker(threading.Thread):
             h, w = image.shape[:2]
             center = (w // 2, h // 2)
             M = cv2.getRotationMatrix2D(center, angle, 1.0)
-            rotated_img = cv2.warpAffine(image.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-            rotated_mask = cv2.warpAffine(mask.astype(np.float32), M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+            rotated_img = cv2.warpAffine(
+                image.astype(np.float32),
+                M,
+                (w, h),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_CONSTANT,
+                borderValue=0,
+            )
+            rotated_mask = cv2.warpAffine(
+                mask.astype(np.float32),
+                M,
+                (w, h),
+                flags=cv2.INTER_NEAREST,
+                borderMode=cv2.BORDER_CONSTANT,
+                borderValue=0,
+            )
             return rotated_img, rotated_mask
 
     def apply_translation_rotation_with_params(self, image, mask, params, img_path):
@@ -637,61 +655,23 @@ class PerturbationWorker(threading.Thread):
             M_rot = cv2.getRotationMatrix2D(center, angle, 1.0)
             M_rot[0, 2] += tx
             M_rot[1, 2] += ty
-            transformed_img = cv2.warpAffine(image.astype(np.float32), M_rot, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-            transformed_mask = cv2.warpAffine(mask.astype(np.float32), M_rot, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+            transformed_img = cv2.warpAffine(
+                image.astype(np.float32),
+                M_rot,
+                (w, h),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_CONSTANT,
+                borderValue=0,
+            )
+            transformed_mask = cv2.warpAffine(
+                mask.astype(np.float32),
+                M_rot,
+                (w, h),
+                flags=cv2.INTER_NEAREST,
+                borderMode=cv2.BORDER_CONSTANT,
+                borderValue=0,
+            )
             return transformed_img, transformed_mask
-
-    def apply_contour_randomization_with_params(self, image, mask, params):
-        disc_labels = [3, 5, 7, 9, 11]
-        use_dilation = params.get('use_dilation', True)
-        random_kernel_conn = params.get('kernel_size', self.params.get('morph_kernel_size', 1))
-        random_iterations = params.get('iterations', self.params.get('morph_iterations', 1))
-
-        if image.ndim == 3:
-            struct = ndi.generate_binary_structure(3, random_kernel_conn)
-
-            final_mask = mask.copy()
-            final_mask[np.isin(mask, disc_labels)] = 0
-            
-            for label in disc_labels:
-                binary_mask = (mask == label)
-                if not np.any(binary_mask):
-                    continue
-                
-                if use_dilation:
-                    processed = ndi.binary_dilation(binary_mask, structure=struct, iterations=random_iterations)
-                else:
-                    processed = ndi.binary_erosion(binary_mask, structure=struct, iterations=random_iterations)
-
-                if np.sum(processed) < self.MIN_PIXEL_THRESHOLD:
-                    final_mask[binary_mask] = label
-                else:
-                    final_mask[processed] = label
-
-            return image.copy(), final_mask
-
-        else:
-            result_mask = mask.copy()
-            kernel_2d_size = max(2, random_iterations * 2)
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_2d_size, kernel_2d_size))
-            
-            for label in disc_labels:
-                binary_mask = (mask == label).astype(np.uint8)
-                if np.sum(binary_mask) == 0:
-                    continue
-                
-                if use_dilation:
-                    processed = cv2.dilate(binary_mask, kernel, iterations=1)
-                else:
-                    processed = cv2.erode(binary_mask, kernel, iterations=1)
-                
-                if np.sum(processed) < self.MIN_PIXEL_THRESHOLD and not use_dilation:
-                     result_mask[mask == label] = label
-                else:
-                    result_mask[mask == label] = 0
-                    result_mask[processed > 0] = label
-        
-            return image.copy(), result_mask
 
 class PerturbationGUI:
     def __init__(self, parent):
@@ -763,15 +743,12 @@ class PerturbationGUI:
                 "原始": 'original',
                 "膨胀": 'dilation',
                 "腐蚀": 'erosion',
-                "轮廓随机化": 'contour_random',
                 "平移": 'translation',
                 "旋转": 'rotation',
                 "高斯噪声": 'gaussian_noise',
                 "平移+旋转": 'translation_rotation',
                 "膨胀+平移+旋转": 'dilation_trans_rot',
                 "腐蚀+平移+旋转": 'erosion_trans_rot',
-                "轮廓随机化+平移+旋转": 'contour_trans_rot',
-                "轮廓随机化+平移+旋转+噪声": 'contour_trans_rot_noise'
             }
             
             for name, check in self.perturb_checks.items():
@@ -888,18 +865,16 @@ class PerturbationGUI:
         
         self.perturb_check_vars = {} 
         perturbations = [
-            "膨胀", "腐蚀", "轮廓随机化", 
+            "膨胀", "腐蚀",
             "平移", "旋转", "高斯噪声", "平移+旋转",
-            "膨胀+平移+旋转", "腐蚀+平移+旋转", 
-            "轮廓随机化+平移+旋转", "轮廓随机化+平移+旋转+噪声"
+            "膨胀+平移+旋转", "腐蚀+平移+旋转"
         ]
         
         perturbation_keys = {
-            "膨胀": 'dilation', "腐蚀": 'erosion', "轮廓随机化": 'contour_random',
+            "膨胀": 'dilation', "腐蚀": 'erosion',
             "平移": 'translation', "旋转": 'rotation', "高斯噪声": 'gaussian_noise',
             "平移+旋转": 'translation_rotation', "膨胀+平移+旋转": 'dilation_trans_rot',
-            "腐蚀+平移+旋转": 'erosion_trans_rot', "轮廓随机化+平移+旋转": 'contour_trans_rot',
-            "轮廓随机化+平移+旋转+噪声": 'contour_trans_rot_noise'
+            "腐蚀+平移+旋转": 'erosion_trans_rot'
         }
         
         for i, name in enumerate(perturbations):
@@ -929,7 +904,7 @@ class PerturbationGUI:
         rot_label.grid(row=0, column=2, sticky="w", padx=(20,0), pady=2)
         self.widgets['rot_label'] = rot_label
         
-        self.rotation_var = tk.IntVar(value=30)
+        self.rotation_var = tk.IntVar(value=20)
         self.rotation_spin = ttk.Spinbox(param_grid, from_=1, to=30,
                                     textvariable=self.rotation_var, width=10)
         self.rotation_spin.grid(row=0, column=3, sticky="w", padx=5, pady=2)
@@ -949,8 +924,8 @@ class PerturbationGUI:
         morph_label.grid(row=row, column=0, sticky="w", pady=2)
         self.widgets['morph_label'] = morph_label
 
-        self.morph_kernel_size = tk.IntVar(value=1)
-        morph_spin = ttk.Spinbox(param_grid, from_=2, to=5, 
+        self.morph_kernel_size = tk.IntVar(value=2)
+        morph_spin = ttk.Spinbox(param_grid, from_=1, to=5, 
                                 textvariable=self.morph_kernel_size, width=10)
         morph_spin.grid(row=row, column=1, sticky="w", padx=5, pady=2)
 
