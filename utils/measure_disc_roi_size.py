@@ -2,8 +2,24 @@ import SimpleITK as sitk
 import numpy as np
 from pathlib import Path
 from typing import Iterable, List, Tuple, Dict
+import os
 
 from config import Config
+
+
+def _read_image_safe(path: Path) -> sitk.Image:
+    try:
+        return sitk.ReadImage(str(path))
+    except RuntimeError:
+        if not path.is_absolute():
+            raise
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(path.parent))
+            return sitk.ReadImage(path.name)
+        finally:
+            os.chdir(old_cwd)
 
 
 def estimate_tensor_roi_size(
@@ -26,8 +42,8 @@ def estimate_tensor_roi_size(
         if not img_path.exists() or not mask_path.exists():
             continue
 
-        img = sitk.ReadImage(str(img_path))
-        mask = sitk.ReadImage(str(mask_path))
+        img = _read_image_safe(img_path)
+        mask = _read_image_safe(mask_path)
 
         sx, sy, sz = img.GetSpacing()
         mask_arr = sitk.GetArrayFromImage(mask)
