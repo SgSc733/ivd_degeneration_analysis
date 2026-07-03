@@ -1,0 +1,239 @@
+{
+  "data": {
+    "mode": "dual_csv",
+    "unperturbed_csv_path": "raw.csv",
+    "perturbed_csv_path": "pert.csv",
+    "csv_path": "最终模型输入.csv",
+    "id_col": "case_id_层级",
+    "label_col": "pfirrmann",
+    "classic_prefix": "classic_",
+    "patient_id_from_id_col": true,
+    "patient_id_sep": "_",
+    "level_from_id_col": true,
+    "level_sep": "_",
+    "segment_levels": ["L3-L4", "L4-L5", "L5-S1"],
+    "add_segment_onehot": false,
+    "case_meta_onehot": {
+      "enabled": false,
+      "statistics_csv_path": "statistics.csv",
+      "case_id_col": "image_id",
+      "columns": ["batch_scanner"],
+      "prefix": "meta_",
+      "drop_first": false,
+      "on_missing": "error"
+    },
+    "pooling": {
+      "stats": ["mean-d"],
+      "pyr_prefix": "PyRadiomics_",
+      "deep_prefix": "DeepPCA_",
+      "tensor_prefix": "TensorPCA_",
+      "feature_types": ["classic", "pyr"],
+      "out_prefix": "pool_"
+    },
+    "feature_order": "csv",
+    "drop_cols": [],
+    "drop_patterns": []
+  },
+  "feature_selection": {
+    "enabled": true,
+    "statistics_csv_path": "statistics.csv",
+    "feature_types": ["classic","pyradiomics","deep","tensor"],
+    "enable_pca": true,
+    "pca_eta": 0.95,
+    "pca_m_cap": 50,
+    "icc_threshold": 0.6,
+    "alpha_fdr": 0.05,
+    "rho_min": 0.0,
+    "dup_corr_threshold": 0.95,
+    "enable_stability_selection": true,
+    "enet_l1_ratio": 0.8,
+    "enable_auto_lambda_cv": true,
+    "lambda_value": 0.01,
+    "lambda_cv_folds": 5,
+    "lambda_cv_n_alphas": 100,
+    "lambda_cv_epsilon": 0.01,
+    "lambda_cv_use_1se": false,
+    "enable_lambda_size_tuning": false,
+    "bootstrap_B": 50,
+    "stability_delta": 0.0001,
+    "stability_tau": 0.3,
+    "k_max": 120,
+    "deep_feature_prefixes": ["Deep_"],
+    "tensor_feature_prefixes": ["Tucker_", "Tensor_", "tensor_", "TENSOR_"],
+    "force_include_features": [
+      "classic_dhi_dhi",
+      "classic_dhi_disc_height",
+      "classic_t2si_si_ratio",
+      "classic_t2si_roi_si",
+      "classic_t2si_csf_si",
+      "classic_asi_peak_diff",
+      "classic_asi_asi",
+      "classic_fd_fd"
+    ]
+  },
+  "labels": {
+    "xlsx_path": "pfirr_data.xlsx",
+    "sheet_name": null,
+    "patient_id_col": "序号",
+    "level_to_col": {
+      "L3-L4": "L34",
+      "L4-L5": "L45",
+      "L5-S1": "L5S1"
+    },
+    "on_missing": "error"
+  },
+  "cv": {
+    "n_splits": 5,
+    "splitter": "stratified_groupkfold",
+    "shuffle": true,
+    "random_state": 0,
+    "balance_pfirrmann_scanner": {
+      "enabled": false,
+      "n_trials": 200,
+      "scanner": {
+        "statistics_csv_path": null,
+        "case_id_col": null,
+        "scanner_col": null
+      },
+      "weights": {
+        "grade": 1.0,
+        "scanner": 1.0,
+        "n_samples": 0.2,
+        "n_groups": 0.2
+      }
+    }
+  },
+  "preprocess": {
+    "method": "rankgauss_zscore",
+    "n_jobs": 0
+  },
+  "harmonization": {
+    "enabled": false,
+    "method": "meanvar",
+    "statistics_csv_path": "statistics.csv",
+    "case_id_col": "image_id",
+    "batch_col": "batch_scanner",
+    "small_batch": {
+      "min_cases": 5,
+      "strategy": "manufacturer__magnetic_field_strength"
+    },
+    "covariates": {
+      "use_task": true
+    },
+    "meanvar": {
+      "eps": 1e-6
+    },
+    "combat": {
+      "variant": "fortin",
+      "parametric": true,
+      "mean_only": false,
+      "eps": 1e-8,
+      "ref_batch": null,
+      "min_samples_per_batch_train": 5
+    }
+  },
+  "ordinal": {
+    "n_classes": 5,
+    "decision_threshold": {
+      "default": 0.5
+    },
+    "beta": 0.2,
+    "qwk_loss_weight": 0.0,
+    "acc_loss_weight": 0.1
+  },
+  "regularization": {
+    "weight_decay": 0.05,
+    "lambda_out": 0.01,
+    "lambda_seg": 0.01,
+    "lambda_task_smooth": 0.1
+  },
+  "monotonicity": {
+    "enabled": true,
+    "mode": "soft",
+    "direction_by_feature": {
+      "classic_dhi_dhi": -1,
+      "classic_dhi_disc_height": -1,
+      "classic_t2si_si_ratio": -1,
+      "classic_t2si_roi_si": -1,
+      "classic_asi_peak_diff": -1,
+      "classic_asi_asi": -1
+    },
+    "lambda_mono": 0.03,
+    "alpha_w": 1.0,
+    "apply_to": "task_weighted",
+    "grid_size": 64,
+    "grid_method": "quantile",
+    "eps_grid": 1e-6,
+    "w_positive_floor": 0.0
+  },
+  "model": {
+    "p": 1,
+    "h_dim": 32,
+    "n_proto": 6,
+    "n_layers": 2,
+    "n_layers_pred": 1,
+    "share_task_weights_across_layers": false,
+    "batch_norm": true,
+    "dropout": 0.25,
+    "dropout_output": 0.25,
+    "tau": 16.0
+  },
+  "interaction": {
+    "enabled": false,
+    "max_pairs": 20,
+    "inner_splits": 5,
+    "selection_max_epoch": 80,
+    "selection_patience": 20,
+    "mlp_hidden_dim": null,
+    "mlp_dropout": 0.0
+  },
+  "training": {
+    "device": "cuda",
+    "multicore_enabled": true,
+    "cpu_threads": 12,
+    "blas_threads": 8,
+    "dataloader_num_workers": 0,
+    "seed": 1,
+    "lr_max": 0.0003,
+    "lr_min": 0.0,
+    "eval_T": 1e-08,
+    "batch_size": 128,
+    "max_epoch": 300,
+    "patience": 50,
+    "min_delta": 0.0001,
+    "stop_monitor": "val_loss_data",
+    "select_monitor": "val_acc",
+    "class_weight_mode": "none"
+  },
+  "threshold_calibration": {
+    "enabled": true,
+    "calib_splits": 5,
+    "objective": "acc",
+    "tie_breakers": ["bacc", "qwk", "-mae", "macro_f1"],
+    "grid_min": 0.25,
+    "grid_max": 0.75,
+    "grid_step": 0.01,
+    "n_iter": 3
+  },
+  "evaluation": {
+    "bootstrap": {
+      "enabled": true,
+      "n_resamples": 1000,
+      "alpha": 0.05,
+      "seed": 0,
+      "n_jobs": 0
+    }
+  },
+  "explain": {
+    "enabled": false,
+    "fold": "best",
+    "dpi": 300,
+    "segment_quantiles": [0.1, 0.3, 0.5, 0.7, 0.9],
+    "segment_n_segments": 3,
+    "lambda_seg": 0.01
+  },
+  "output": {
+    "base_dir": "outputs",
+    "run_name": null
+  }
+}

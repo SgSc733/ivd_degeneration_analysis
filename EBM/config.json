@@ -1,0 +1,148 @@
+{
+  "data": {
+    "csv_path": "最终模型输入.csv",
+    "id_col": "case_id_层级",
+    "label_col": "pfirrmann",
+    "classic_prefix": "classic_",
+    "patient_id_from_id_col": true,
+    "patient_id_sep": "_",
+    "level_from_id_col": true,
+    "level_sep": "_",
+    "segment_levels": [
+      "L3-L4",
+      "L4-L5",
+      "L5-S1"
+    ],
+    "pooling": {
+      "stats": [
+        "mean-d"
+      ],
+      "pyr_prefix": "PyRadiomics_",
+      "deep_prefix": "DeepPCA_",
+      "tensor_prefix": "TensorPCA_",
+      "feature_types": [
+        "classic"
+      ],
+      "out_prefix": "pool_"
+    },
+    "drop_cols": [],
+    "mode": "dual_csv",
+    "unperturbed_csv_path": "raw.csv",
+    "perturbed_csv_path": "pert.csv",
+    "keep_feature_patterns": []
+  },
+  "labels": {
+    "xlsx_path": "pfirr_data.xlsx",
+    "sheet_name": "Sheet1",
+    "patient_id_col": "序号",
+    "level_to_col": {
+      "L3-L4": "L34",
+      "L4-L5": "L45",
+      "L5-S1": "L5S1"
+    },
+    "on_missing": "error"
+  },
+  "cv": {
+    "n_splits": 5
+  },
+  "ebm": {
+    "random_state": 0,
+    "feature_disc_level_name": "disc_level",
+    "max_bins": 128,
+    "max_interaction_bins": 32,
+    "interactions": 0,
+    "validation_size": 0.15,
+    "outer_bags": 16,
+    "inner_bags": 0,
+    "learning_rate": 0.02,
+    "smoothing_rounds": 200,
+    "interaction_smoothing_rounds": 100,
+    "max_rounds": 10000,
+    "early_stopping_rounds": 200,
+    "early_stopping_tolerance": 1e-05,
+    "min_samples_leaf": 4,
+    "max_leaves": 2,
+    "objective": "rmse",
+    "n_jobs": 1
+  },
+  "ordinal": {
+    "n_classes": 5,
+    "decision_threshold": {
+      "default": 0.5
+    },
+    "decision_rule": "threshold"
+  },
+  "calibration": {
+    "device": "cuda",
+    "learn_alpha": true,
+    "lr": 0.01,
+    "weight_decay": 0.0001,
+    "max_epoch": 500,
+    "patience": 50,
+    "min_delta": 0.0,
+    "validation_size": 0.2
+  },
+  "explain": {
+    "enabled": false,
+    "fold": "best",
+    "dpi": 300,
+    "save_local_contrib": false,
+    "segment_quantiles": [
+      0.1,
+      0.3,
+      0.5,
+      0.7,
+      0.9
+    ],
+    "segment_n_segments": 3,
+    "lambda_seg": 0.01
+  },
+  "output": {
+    "base_dir": "outputs",
+    "run_name": null
+  },
+  "feature_selection": {
+    "enabled": true,
+    "statistics_csv_path": "statistics.csv",
+    "feature_types": ["classic","pyradiomics","deep","tensor"],
+    "enable_pca": true,
+    "pca_eta": 0.95,
+    "pca_m_cap": 50,
+    "icc_threshold": 0.75,
+    "alpha_fdr": 0.05,
+    "rho_min": 0.0,
+    "dup_corr_threshold": 0.95,
+    "enable_stability_selection": true,
+    "enet_l1_ratio": 0.8,
+    "enable_auto_lambda_cv": true,
+    "lambda_value": 0.01,
+    "lambda_cv_folds": 5,
+    "lambda_cv_n_alphas": 100,
+    "lambda_cv_epsilon": 0.01,
+    "lambda_cv_use_1se": false,
+    "enable_lambda_size_tuning": false,
+    "bootstrap_B": 50,
+    "stability_delta": 0.0001,
+    "stability_tau": 0.5,
+    "k_max": 100,
+    "deep_feature_prefixes": [
+      "Deep_"
+    ],
+    "tensor_feature_prefixes": [
+      "Tucker_",
+      "Tensor_",
+      "tensor_",
+      "TENSOR_"
+    ],
+    "force_include_features": [
+      "classic_dhi_dhi",
+      "classic_dhi_disc_height",
+      "classic_t2si_si_ratio",
+      "classic_t2si_roi_si",
+      "classic_t2si_csf_si",
+      "classic_asi_peak_diff",
+      "classic_asi_asi",
+      "classic_fd_fd"
+    ]
+  }
+}

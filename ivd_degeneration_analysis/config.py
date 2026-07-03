@@ -1,0 +1,189 @@
+class Config:
+
+
+    DISC_LABELS = {
+        'L3-L4': {'disc': 7, 'upper': 6, 'lower': 8},
+        'L4-L5': {'disc': 9, 'upper': 8, 'lower': 10},
+        'L5-S1': {'disc': 11, 'upper': 10, 'lower': 12}
+    }
+
+    DSCR_VERTEBRA_LABELS = {
+        'L3': 6,
+        'L4': 8,
+        'L5': 10,
+        'S1': 12,
+    }
+
+
+    DURAL_SAC_LABEL = 20  
+    
+
+    DSCR_PARAMS = {
+        'spline_smoothing': 0, 
+        'spline_degree': 2,     
+        'min_landmarks': 3    
+    }
+
+
+    DHI_PARAMS = {
+        'central_ratio': 0.8,
+        'calculate_dwr': True,
+        'consider_bulging': True
+    }
+    
+    ASI_PARAMS = {
+        'n_components': 2,
+        'scale_factor': 255.0
+    }
+    
+    FD_PARAMS = {
+        'threshold_percent': 0.65,
+        'min_box_size': 1,
+        'max_box_size': None
+    }
+    
+    T2SI_PARAMS = {
+        'roi_method': 'TARGET',
+        'brightness_percentile': 75,
+        'min_roi_size': 20
+    }
+
+    GABOR_PARAMS = {
+        'wavelengths': [2, 4, 6, 8, 10],
+        'orientations': None,  
+        'frequency': 0.1,
+        'sigma': None,
+        'gamma': 0.5,
+        'psi': 0
+    }
+
+    HU_MOMENTS_PARAMS = {}
+
+    TEXTURE_PARAMS = {
+        'lbp_radius': 1,
+        'lbp_n_points': 8,
+    }
+
+        # ✅ HIZ Calculator 参数（对应图片中的 λthreshold、min/max hiz size）
+    HIZ_PARAMS = {
+        'threshold_factor': 0.15,  # λthreshold，图片默认 1.0
+        'min_hiz_size': 3,  # min_hiz_size
+        'max_hiz_size': 2000  # max_hiz_size（同时也用于 F2 的归一化上限）
+    }
+
+    MODIC_PARAMS = {
+        'endplate_ratio': 0.15,
+        'enable_parallel': True,
+        'max_workers': 2,
+    }
+
+    TENSOR_ROI_PARAMS = {
+        'roi_size': [72, 40, 64],
+        'target_spacing_mm': 1.0,
+        'q_low': 1,
+        'q_high': 99,
+    }
+
+    TENSOR_TUCKER_PARAMS = {
+        'energy_threshold': 0.95,
+        'k_singular_values': 10
+    }
+
+    TENSOR_PATCH_PARAMS = {
+        'patch_size': 4,
+        'similar_patches': 64,
+        'search_window': 15,
+        'internal_iterations': 50,
+        'epsilon': 1e-16,
+        'alpha_feedback': 0.1,
+        'beta_noise': 0.3,
+        'max_patch_groups': 64,
+        'max_singular_values': 10
+    }
+
+    TENSOR_CP_PARAMS = {
+        'rank': 8,
+        'max_iter': 1000,
+        'tol': 1e-4,
+        'epsilon_cp': 1e-6,
+        'top_components': 3,
+        'random_state': 0
+    }
+
+    NUM_SLICES = 3 
+    SLICE_AXIS = 0  
+
+    VIS_PARAMS = {
+        'style': 'seaborn',
+        'dpi': 150,
+        'save_intermediate': True
+    }
+
+    PREPROCESSING_PARAMS = {
+        'target_size': [512, 512],  
+        'texture': {
+            'bin_width': 16,
+            'normalize': True,
+            'robust': False,  
+            'exclude_percentile': 0.0  
+        },
+        'fractal': {
+            'window_center': 128,
+            'window_width': 255,
+            'threshold_percentile': 65,
+            'edge_method': 'canny'
+        },
+        'signal_intensity': {
+            'interpolation': 'linear'
+        }
+    }
+
+    FILTER_PARAMS = {
+        'log': {
+            'sigma_list': [1, 3, 5]
+        },
+        'wavelet': {
+            'wavelet': 'db1',
+            'level': 1
+        }
+    }
+
+    OUTPUT_FORMATS = ['excel', 'json', 'csv']
+
+    FEATURE_SETS = {
+        'conventional': ['dhi', 'asi'],
+        'shape': ['dhi', 'hu_moments', 'dscr'], 
+        'texture': ['gabor', 'texture_features'],
+        'fractal': ['fd'],
+        'signal': ['t2si'],
+        'stenosis': ['dscr'],  
+        'all': ['dhi', 'asi', 'fd', 't2si', 'gabor', 'hu_moments', 'texture_features', 'dscr','hiz','modic'],
+        'hiz': ['hiz'],
+        'modic': ['modic']
+    }
+
+    PARALLEL_CONFIG = {
+        'enabled': True,  
+        'max_workers': None, 
+        'chunk_size': 1,  
+        'backend': 'multiprocessing',  
+        'use_gpu': False,  
+    }
+
+    MEMORY_CONFIG = {
+        'max_memory_gb': 8,  
+        'cache_enabled': True,  
+        'gc_interval': 10,  
+    }
+
+    CALCULATOR_PARALLEL = {
+        'dhi': {'enabled': False},  
+        'asi': {'enabled': True, 'max_workers': 2},
+        'fd': {'enabled': False},   
+        't2si': {'enabled': True, 'max_workers': 2},
+        'gabor': {'enabled': True, 'max_workers': 4}, 
+        'hu': {'enabled': False},   
+        'texture': {'enabled': True, 'max_workers': 4},
+        'hiz': {'enabled': True, 'max_workers': 2},
+        'modic': {'enabled': True, 'max_workers': 2}
+    }
